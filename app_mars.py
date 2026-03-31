@@ -65,12 +65,11 @@ def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, r
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open("Torre_de_Controle_Mars").sheet1
-        
         linha = [datetime.now().strftime("%d/%m/%Y %H:%M"), promotor, loja, total_focais, total_comprados, rupturas, tipo]
         sheet.append_row(linha)
     except: pass 
 
-# --- LISTA MESTRA FOCAL (40 ITENS) ---
+# --- PRODUTOS E ROTAS ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -86,12 +85,8 @@ PRODUTOS_FOCAIS = {
 
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
-    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"],
-    "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"],
-    "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
-    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"],
-    "MADALLA": ["TOCANTINS", "UBA"],
-    "FERNANDA": ["JUIZ DE FORA"]
+    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"], "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
+    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"], "MADALLA": ["TOCANTINS", "UBA"], "FERNANDA": ["JUIZ DE FORA"]
 }
 
 @st.cache_data
@@ -103,7 +98,7 @@ def carregar_vendas():
         return df
     except: return pd.DataFrame()
 
-# --- FUNÇÃO PDF AJUSTADA ---
+# --- FUNÇÃO PDF ATUALIZADA ---
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4)
@@ -117,31 +112,42 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     
     if not df_audit.empty:
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
-        # Colunas: Produto, Preço Loja, Preço Rec., Crítica, Falta?
-        data_audit = [["Produto", "Preço Loja", "Rec. Mars", "Crítica", "Falta?"]]
+        data_audit = [["Produto", "Preço Loja", "Rec. Mars", "Crítica"]]
         
-        for r in df_audit.itertuples():
-            p_loja = r._6 # PREÇO GÔNDOLA
+        row_colors = []
+        for i, r in enumerate(df_audit.itertuples()):
+            p_loja = float(r._6) # PREÇO GÔNDOLA
             p_rec_limpo = str(r.SUGERIDO).replace("R$", "").strip()
             p_rec = float(p_rec_limpo)
             
-            # Lógica da Crítica
-            if p_loja == 0: critica = "N/I"
-            elif p_loja == p_rec: critica = "CORRETO"
-            elif p_loja > p_rec: critica = "ACIMA"
-            else: critica = "ABAIXO"
+            # Lógica da Crítica solicitada
+            if p_loja == 0:
+                critica = "N/I"
+            elif p_loja > p_rec:
+                porcentagem = ((p_loja - p_rec) / p_rec) * 100
+                critica = f"+{porcentagem:.1f}%"
+                row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red))
+            else:
+                critica = "CORRETO"
             
-            falta = "🚨 SIM" if r._5 else "NÃO"
-            data_audit.append([r.PRODUTO[:25], f"R$ {p_loja:.2f}", r.SUGERIDO, critica, falta])
+            data_audit.append([r.PRODUTO[:30], f"R$ {p_loja:.2f}", r.SUGERIDO, critica])
             
-        t1 = Table(data_audit, colWidths=[180, 70, 70, 70, 60])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('FONTSIZE', (0,0), (-1,-1), 8)]))
+        t1 = Table(data_audit, colWidths=[240, 80, 80, 80])
+        estilo_tabela = [
+            ('BACKGROUND', (0,0), (-1,0), colors.navy),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+            ('FONTSIZE', (0,0), (-1,-1), 9)
+        ]
+        estilo_tabela.extend(row_colors)
+        t1.setStyle(TableStyle(estilo_tabela))
         elementos.append(t1); elementos.append(Spacer(1, 15))
 
-    elementos.append(Paragraph("<b>2. RUPTURAS COMERCIAIS (OPORTUNIDADES)</b>", estilos['Heading3']))
+    elementos.append(Paragraph("<b>2. OPORTUNIDADES</b>", estilos['Heading3']))
     data_ruptura = [["Código", "Item Focal Não Encontrado no Mix da Loja"]]
     for r in df_faltantes: data_ruptura.append([r[0], r[1]])
-    t2 = Table(data_ruptura, colWidths=[80, 360])
+    t2 = Table(data_ruptura, colWidths=[80, 400])
     t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
     elementos.append(t2); elementos.append(Spacer(1, 15))
     
@@ -190,7 +196,6 @@ else:
             vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
             cidade_loja = vendas_loja.iloc[0]['CIDADE']
             unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
-            
             arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
 
             compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
@@ -201,12 +206,13 @@ else:
                     v_item = vendas_loja[vendas_loja['PRODUTO CODIGO'].astype(str) == cod]
                     u_data = v_item['DATA'].max().strftime('%d/%m/%Y') if not v_item.empty else "N/A"
                     p_s = buscar_preco_na_tabela(arquivo_preco, cod)
+                    # Note: O campo "FALTA NA LOJA?" aqui é para o editor do Streamlit, não vai para o PDF
                     dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "ÚLTIMA COMPRA": u_data, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
                 else:
                     faltantes_comerciais.append([cod, nome])
 
             if dados_audit:
-                st.write(f"### Auditoria de Portfólio - {loja} ({cidade_loja})")
+                st.write(f"### Auditoria - {loja} ({cidade_loja})")
                 df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "ÚLTIMA COMPRA", "SUGERIDO"])
                 feedback = st.text_area("🗣️ Observações do Promotor:")
                 
@@ -216,5 +222,3 @@ else:
                         enviar_email(f"🐾 OPORTUNIDADE MARS: {loja} ({cidade_loja})", pdf)
                         salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes_comerciais), "PADRAO")
                         st.success("Enviado com sucesso!"); st.balloons()
-            else:
-                st.error("🚨 CRÍTICO: Este cliente não possui compras de itens focais.")
