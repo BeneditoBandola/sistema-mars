@@ -57,28 +57,18 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- FUNÇÃO TORRE DE CONTROLE (AJUSTADA PARA STREAMLIT CLOUD) ---
+# --- FUNÇÃO TORRE DE CONTROLE ---
 def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, rupturas, tipo="PADRAO"):
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        # Usando st.secrets em vez de arquivo local credenciais.json
         creds_dict = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open("Torre_de_Controle_Mars").sheet1
         
-        linha = [
-            datetime.now().strftime("%d/%m/%Y %H:%M"), 
-            promotor, 
-            loja, 
-            total_focais, 
-            total_comprados, 
-            rupturas,
-            tipo
-        ]
+        linha = [datetime.now().strftime("%d/%m/%Y %H:%M"), promotor, loja, total_focais, total_comprados, rupturas, tipo]
         sheet.append_row(linha)
-    except:
-        pass 
+    except: pass 
 
 # --- LISTA MESTRA FOCAL (40 ITENS) ---
 PRODUTOS_FOCAIS = {
@@ -111,39 +101,53 @@ def carregar_vendas():
         df.columns = [c.strip().upper() for c in df.columns]
         df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
         return df
-    except:
-        st.error("Arquivo Vendas_Mars.csv não encontrado no GitHub!")
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
-# --- FUNÇÕES PDF E EMAIL ---
-def gerar_pdf_mars(promotor, loja, df_audit, df_faltantes, feedback):
+# --- FUNÇÃO PDF AJUSTADA ---
+def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4)
     elementos = []
     estilos = getSampleStyleSheet()
-    elementos.append(Paragraph(f"<b>RELATÓRIOS DE OPORTUNIDADES SMALL BAGS E INOVAÇÕES</b>", estilos['Title']))
-    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
-    elementos.append(Paragraph(f"<b>DATA:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilos['Normal']))
-    elementos.append(Spacer(1, 12))
+    
+    elementos.append(Paragraph(f"<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilos['Title']))
+    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade}", estilos['Normal']))
+    elementos.append(Paragraph(f"<b>PROMOTOR:</b> {promotor} | <b>DATA:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilos['Normal']))
+    elementos.append(Spacer(1, 15))
     
     if not df_audit.empty:
-        elementos.append(Paragraph("<b>1. EXECUÇÃO DE GÔNDOLA (ITENS EM PORTFÓLIO)</b>", estilos['Heading3']))
-        data_audit = [["Produto", "Últ. Faturamento", "Preço", "Falta?"]]
+        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
+        # Colunas: Produto, Preço Loja, Preço Rec., Crítica, Falta?
+        data_audit = [["Produto", "Preço Loja", "Rec. Mars", "Crítica", "Falta?"]]
+        
         for r in df_audit.itertuples():
-            status = "🚨 SIM" if r._5 else "NÃO"
-            data_audit.append([r.PRODUTO[:30], r._3, f"R$ {r._6}", status])
-        t1 = Table(data_audit, colWidths=[200, 100, 70, 70])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+            p_loja = r._6 # PREÇO GÔNDOLA
+            p_rec_limpo = str(r.SUGERIDO).replace("R$", "").strip()
+            p_rec = float(p_rec_limpo)
+            
+            # Lógica da Crítica
+            if p_loja == 0: critica = "N/I"
+            elif p_loja == p_rec: critica = "CORRETO"
+            elif p_loja > p_rec: critica = "ACIMA"
+            else: critica = "ABAIXO"
+            
+            falta = "🚨 SIM" if r._5 else "NÃO"
+            data_audit.append([r.PRODUTO[:25], f"R$ {p_loja:.2f}", r.SUGERIDO, critica, falta])
+            
+        t1 = Table(data_audit, colWidths=[180, 70, 70, 70, 60])
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('FONTSIZE', (0,0), (-1,-1), 8)]))
         elementos.append(t1); elementos.append(Spacer(1, 15))
 
-    elementos.append(Paragraph("<b>2. RUPTURAS COMERCIAIS (OPORTUNIDADE DE VENDA)</b>", estilos['Heading3']))
-    data_ruptura = [["Código", "Item Focal Não Negativado"]]
+    elementos.append(Paragraph("<b>2. RUPTURAS COMERCIAIS (OPORTUNIDADES)</b>", estilos['Heading3']))
+    data_ruptura = [["Código", "Item Focal Não Encontrado no Mix da Loja"]]
     for r in df_faltantes: data_ruptura.append([r[0], r[1]])
     t2 = Table(data_ruptura, colWidths=[80, 360])
     t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
     elementos.append(t2); elementos.append(Spacer(1, 15))
     
-    elementos.append(Paragraph(f"<b>INTELIGÊNCIA DE CAMPO:</b> {feedback}", estilos['Normal']))
+    elementos.append(Paragraph(f"<b>OBSERVAÇÕES DO PROMOTOR:</b>", estilos['Heading3']))
+    elementos.append(Paragraph(feedback if feedback else "Sem observações adicionais.", estilos['Normal']))
+    
     doc.build(elementos)
     return nome_arquivo
 
@@ -184,16 +188,11 @@ else:
 
         if loja != "-- Selecione --":
             vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
+            cidade_loja = vendas_loja.iloc[0]['CIDADE']
             unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
             
-            if unidade_txt.startswith("1") or unidade_txt.startswith("4"):
-                arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv"
-            else:
-                arquivo_preco = "PAULISTINHAS MARS PREÇO.csv"
+            arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
 
-            st.sidebar.error(f"🏢 UNIDADE: {unidade_txt}")
-            st.sidebar.info(f"📂 TABELA: {arquivo_preco}")
-            
             compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
             dados_audit, faltantes_comerciais = [], []
 
@@ -207,21 +206,15 @@ else:
                     faltantes_comerciais.append([cod, nome])
 
             if dados_audit:
-                st.write(f"### Auditoria de Portfólio - {loja}")
+                st.write(f"### Auditoria de Portfólio - {loja} ({cidade_loja})")
                 df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "ÚLTIMA COMPRA", "SUGERIDO"])
-                feedback = st.text_area("🗣️ Opinião/Ponto de Melhoria:")
+                feedback = st.text_area("🗣️ Observações do Promotor:")
+                
                 if st.button("🚀 FINALIZAR E ENVIAR RELATÓRIO", use_container_width=True):
                     with st.spinner("Enviando..."):
-                        pdf = gerar_pdf_mars(promotor, loja, df_edit, faltantes_comerciais, feedback)
-                        enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf)
+                        pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes_comerciais, feedback)
+                        enviar_email(f"🐾 OPORTUNIDADE MARS: {loja} ({cidade_loja})", pdf)
                         salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes_comerciais), "PADRAO")
                         st.success("Enviado com sucesso!"); st.balloons()
             else:
-                st.error("🚨 CRÍTICO: Este cliente não possui NENHUMA compra de itens focais em 2026.")
-                feedback_total = st.text_area("🗣️ Justificativa da Falta de Mix Total:")
-                if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO", use_container_width=True):
-                    with st.spinner("Gerando crítica..."):
-                        pdf = gerar_pdf_mars(promotor, loja, pd.DataFrame(), faltantes_comerciais, feedback_total)
-                        enviar_email(f"🚨 CRÍTICA MIX TOTAL: {loja}", pdf)
-                        salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), 0, len(PRODUTOS_FOCAIS), "CRÍTICA TOTAL")
-                        st.success("Crítica de Mix Total enviada!"); st.balloons()
+                st.error("🚨 CRÍTICO: Este cliente não possui compras de itens focais.")
