@@ -30,7 +30,14 @@ st.markdown("""
     div.stButton > button:hover { background-color: #FF00FF; color: white; }
     .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
     h1, h2, h3 { color: #FFD700 !important; }
-    .tabela-info { background-color: #FF00FF; color: white; padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 15px; }
+    /* Estilo para as informações na lateral */
+    .sidebar-info { 
+        background-color: #002d5c; 
+        padding: 10px; 
+        border-left: 5px solid #FF00FF; 
+        margin-top: 20px;
+        font-size: 13px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,7 +62,6 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- FUNÇÃO TORRE DE CONTROLE ---
 def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, rupturas, tipo="PADRAO"):
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -67,7 +73,7 @@ def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, r
         sheet.append_row(linha)
     except: pass 
 
-# --- DADOS MESTRE (40 ITENS FOCAIS) ---
+# --- DADOS MESTRE (40 ITENS) ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -103,18 +109,14 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "PREÇO RECOMENDADO", "PREÇO LOJA", "SITUAÇÃO"]]
         row_colors = []
-        
         for i, r in enumerate(df_audit.itertuples()):
             p_loja = float(r._4) 
             p_rec_val = float(str(r.SUGERIDO).replace("R$", "").strip())
-            
             if p_loja > p_rec_val:
                 perc = ((p_loja - p_rec_val) / p_rec_val) * 100
                 sit = f"ACIMA (+{perc:.1f}%)"
                 row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red))
-            else:
-                sit = "CORRETO"
-            
+            else: sit = "CORRETO"
             data_audit.append([r.PRODUTO[:30], r.SUGERIDO, f"R$ {p_loja:.2f}", sit])
             
         t1 = Table(data_audit, colWidths=[220, 80, 80, 100])
@@ -152,19 +154,17 @@ try:
     df_vendas.columns = [c.strip().upper() for c in df_vendas.columns]
     df_vendas['DATA'] = pd.to_datetime(df_vendas['DATA'], errors='coerce')
 except:
-    st.error("Erro ao carregar Vendas_Mars.csv")
-    st.stop()
-
-st.title("🐾 RELATÓRIOS DE OPORTUNIDADES")
+    st.error("Erro ao carregar Vendas_Mars.csv"); st.stop()
 
 if 'user_mars' not in st.session_state:
+    st.title("🐾 RELATÓRIOS DE OPORTUNIDADES")
     cols = st.columns(3)
     for i, nome in enumerate(ROTAS_MARS.keys()):
         if cols[i % 3].button(nome, use_container_width=True):
             st.session_state.user_mars = nome; st.rerun()
 else:
     promotor = st.session_state.user_mars
-    st.sidebar.title(f"Promotor: {promotor}")
+    st.sidebar.title(f"👤 {promotor}")
     if st.sidebar.button("Sair"): del st.session_state.user_mars; st.rerun()
 
     df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
@@ -177,14 +177,18 @@ else:
         vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_loja = vendas_loja.iloc[0]['CIDADE']
         unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
-        
-        # DEFINIÇÃO E EXIBIÇÃO DA TABELA USADA
         arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
-        st.markdown(f'<div class="tabela-info">📁 TABELA DE PREÇO UTILIZADA: {arquivo_preco}</div>', unsafe_allow_html=True)
+        
+        # INFORMAÇÕES NA SIDEBAR ABAIXO DO SAIR
+        st.sidebar.markdown(f"""
+        <div class="sidebar-info">
+        <b>📍 FILIAL:</b> {unidade_txt}<br>
+        <b>📁 TABELA:</b> {arquivo_preco}
+        </div>
+        """, unsafe_allow_html=True)
 
         compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
         dados_audit, faltantes = [], []
-        
         for cod, nome in PRODUTOS_FOCAIS.items():
             if cod in compras_cliente:
                 p_s = buscar_preco_na_tabela(arquivo_preco, cod)
@@ -196,7 +200,6 @@ else:
             st.write(f"### Auditoria - {loja} ({cidade_loja})")
             df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
             feedback = st.text_area("🗣️ Observações do Promotor:")
-            
             if st.button("🚀 FINALIZAR E ENVIAR RELATÓRIO", use_container_width=True):
                 with st.spinner("Enviando..."):
                     pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
@@ -204,7 +207,7 @@ else:
                     salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes))
                     st.success("Enviado com sucesso!"); st.balloons()
         else:
-            st.error("🚨 ESTE CLIENTE NÃO POSSUI MIX FOCAL COMPRADO.")
+            st.error("🚨 CLIENTE NÃO COMPROU NENHUMA VERSÃO DE SMALL BAGS NEM DE INOVAÇÕES EM 2026")
             feedback_cr = st.text_area("🗣️ Justificativa da Falta de Mix:")
             if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO", use_container_width=True):
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_cr)
