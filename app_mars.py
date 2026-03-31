@@ -108,10 +108,9 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             p_rec_val = float(str(r.SUGERIDO).replace("R$", "").strip())
             falta_status = "SIM" if r._4 else "NÃO"
             
-            # Lógica da Situação e Porcentagem
             if p_loja == 0:
-                sit = "FALTA" # Mudado de N/I para FALTA
-                row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red)) # Forcei cor vermelha para FALTA
+                sit = "FALTA"
+                row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red))
             else:
                 perc = ((p_loja - p_rec_val) / p_rec_val) * 100
                 if p_loja > p_rec_val:
