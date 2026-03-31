@@ -30,14 +30,7 @@ st.markdown("""
     div.stButton > button:hover { background-color: #FF00FF; color: white; }
     .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
     h1, h2, h3 { color: #FFD700 !important; }
-    /* Estilo para as informações na lateral */
-    .sidebar-info { 
-        background-color: #002d5c; 
-        padding: 10px; 
-        border-left: 5px solid #FF00FF; 
-        margin-top: 20px;
-        font-size: 13px;
-    }
+    .sidebar-info { background-color: #002d5c; padding: 10px; border-left: 5px solid #FF00FF; margin-top: 20px; font-size: 13px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -73,7 +66,7 @@ def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, r
         sheet.append_row(linha)
     except: pass 
 
-# --- DADOS MESTRE (40 ITENS) ---
+# --- PRODUTOS E ROTAS ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -107,20 +100,37 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     
     if not df_audit.empty:
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
-        data_audit = [["PRODUTO", "PREÇO RECOMENDADO", "PREÇO LOJA", "SITUAÇÃO"]]
+        data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
         row_colors = []
+        
         for i, r in enumerate(df_audit.itertuples()):
-            p_loja = float(r._4) 
+            # Correção de índices: 0:Index, 1:CÓDIGO, 2:PRODUTO, 3:SUGERIDO, 4:FALTA, 5:PREÇO
+            p_loja = float(r._5) 
             p_rec_val = float(str(r.SUGERIDO).replace("R$", "").strip())
-            if p_loja > p_rec_val:
-                perc = ((p_loja - p_rec_val) / p_rec_val) * 100
-                sit = f"ACIMA (+{perc:.1f}%)"
-                row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red))
-            else: sit = "CORRETO"
-            data_audit.append([r.PRODUTO[:30], r.SUGERIDO, f"R$ {p_loja:.2f}", sit])
+            falta_status = "SIM" if r._4 else "NÃO"
             
-        t1 = Table(data_audit, colWidths=[220, 80, 80, 100])
-        estilo_t1 = [('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('ALIGN', (1,0), (-1,-1), 'CENTER')]
+            # Lógica da Situação e Porcentagem
+            if p_loja == 0:
+                sit = "N/I"
+            else:
+                perc = ((p_loja - p_rec_val) / p_rec_val) * 100
+                if p_loja > p_rec_val:
+                    sit = f"ACIMA (+{perc:.1f}%)"
+                    row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red))
+                else:
+                    sit = f"CORRETO ({perc:.1f}%)"
+            
+            data_audit.append([r.PRODUTO[:30], r.SUGERIDO, f"R$ {p_loja:.2f}", sit, falta_status])
+            
+        # Ajuste de larguras: REC. MARS e PREÇO LOJA menores para caber tudo
+        t1 = Table(data_audit, colWidths=[180, 75, 75, 100, 50])
+        estilo_t1 = [
+            ('BACKGROUND', (0,0), (-1,0), colors.navy),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+            ('FONTSIZE', (0,0), (-1,-1), 8)
+        ]
         estilo_t1.extend(row_colors)
         t1.setStyle(TableStyle(estilo_t1)); elementos.append(t1); elementos.append(Spacer(1, 15))
 
@@ -179,20 +189,15 @@ else:
         unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
         arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
         
-        # INFORMAÇÕES NA SIDEBAR ABAIXO DO SAIR
-        st.sidebar.markdown(f"""
-        <div class="sidebar-info">
-        <b>📍 FILIAL:</b> {unidade_txt}<br>
-        <b>📁 TABELA:</b> {arquivo_preco}
-        </div>
-        """, unsafe_allow_html=True)
+        st.sidebar.markdown(f"""<div class="sidebar-info"><b>📍 FILIAL:</b> {unidade_txt}<br><b>📁 TABELA:</b> {arquivo_preco}</div>""", unsafe_allow_html=True)
 
         compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
         dados_audit, faltantes = [], []
         for cod, nome in PRODUTOS_FOCAIS.items():
             if cod in compras_cliente:
                 p_s = buscar_preco_na_tabela(arquivo_preco, cod)
-                dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "SUGERIDO": f"R$ {p_s:.2f}", "PREÇO GÔNDOLA": 0.0})
+                # Adicionado coluna de FALTA no data_editor
+                dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
             else:
                 faltantes.append([cod, nome])
 
