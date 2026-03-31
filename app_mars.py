@@ -6,7 +6,7 @@ import smtplib
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
-import datetime as dt
+import io
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 
@@ -30,12 +30,12 @@ st.markdown("""
     div.stButton > button:hover { background-color: #FF00FF; color: white; }
     .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
     h1, h2, h3 { color: #FFD700 !important; }
+    .tabela-info { background-color: #FF00FF; color: white; padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
 # --- FUNÇÕES DE AUXÍLIO ---
 def obter_horario_brasil():
-    # Ajusta para o horário de Brasília (UTC-3)
     return (datetime.utcnow() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
 
 def limpar_texto(txt):
@@ -67,7 +67,7 @@ def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, r
         sheet.append_row(linha)
     except: pass 
 
-# --- DADOS MESTRE ---
+# --- DADOS MESTRE (40 ITENS FOCAIS) ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -103,8 +103,9 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "PREÇO RECOMENDADO", "PREÇO LOJA", "SITUAÇÃO"]]
         row_colors = []
+        
         for i, r in enumerate(df_audit.itertuples()):
-            p_loja = float(r._6)
+            p_loja = float(r._4) 
             p_rec_val = float(str(r.SUGERIDO).replace("R$", "").strip())
             
             if p_loja > p_rec_val:
@@ -146,9 +147,13 @@ def enviar_email(assunto, pdf):
     except: return False
 
 # --- INTERFACE ---
-df_vendas = pd.read_csv("Vendas_Mars.csv", sep=None, engine='python', encoding='utf-8-sig')
-df_vendas.columns = [c.strip().upper() for c in df_vendas.columns]
-df_vendas['DATA'] = pd.to_datetime(df_vendas['DATA'], errors='coerce')
+try:
+    df_vendas = pd.read_csv("Vendas_Mars.csv", sep=None, engine='python', encoding='utf-8-sig')
+    df_vendas.columns = [c.strip().upper() for c in df_vendas.columns]
+    df_vendas['DATA'] = pd.to_datetime(df_vendas['DATA'], errors='coerce')
+except:
+    st.error("Erro ao carregar Vendas_Mars.csv")
+    st.stop()
 
 st.title("🐾 RELATÓRIOS DE OPORTUNIDADES")
 
@@ -172,10 +177,14 @@ else:
         vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_loja = vendas_loja.iloc[0]['CIDADE']
         unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
+        
+        # DEFINIÇÃO E EXIBIÇÃO DA TABELA USADA
         arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
+        st.markdown(f'<div class="tabela-info">📁 TABELA DE PREÇO UTILIZADA: {arquivo_preco}</div>', unsafe_allow_html=True)
 
         compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
         dados_audit, faltantes = [], []
+        
         for cod, nome in PRODUTOS_FOCAIS.items():
             if cod in compras_cliente:
                 p_s = buscar_preco_na_tabela(arquivo_preco, cod)
@@ -187,6 +196,7 @@ else:
             st.write(f"### Auditoria - {loja} ({cidade_loja})")
             df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
             feedback = st.text_area("🗣️ Observações do Promotor:")
+            
             if st.button("🚀 FINALIZAR E ENVIAR RELATÓRIO", use_container_width=True):
                 with st.spinner("Enviando..."):
                     pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
