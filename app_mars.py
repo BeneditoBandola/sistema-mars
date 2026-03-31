@@ -104,14 +104,14 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         row_colors = []
         
         for i, r in enumerate(df_audit.itertuples()):
-            # Correção de índices: 0:Index, 1:CÓDIGO, 2:PRODUTO, 3:SUGERIDO, 4:FALTA, 5:PREÇO
             p_loja = float(r._5) 
             p_rec_val = float(str(r.SUGERIDO).replace("R$", "").strip())
             falta_status = "SIM" if r._4 else "NÃO"
             
             # Lógica da Situação e Porcentagem
             if p_loja == 0:
-                sit = "N/I"
+                sit = "FALTA" # Mudado de N/I para FALTA
+                row_colors.append(('TEXTCOLOR', (3, i+1), (3, i+1), colors.red)) # Forcei cor vermelha para FALTA
             else:
                 perc = ((p_loja - p_rec_val) / p_rec_val) * 100
                 if p_loja > p_rec_val:
@@ -122,7 +122,6 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             
             data_audit.append([r.PRODUTO[:30], r.SUGERIDO, f"R$ {p_loja:.2f}", sit, falta_status])
             
-        # Ajuste de larguras: REC. MARS e PREÇO LOJA menores para caber tudo
         t1 = Table(data_audit, colWidths=[180, 75, 75, 100, 50])
         estilo_t1 = [
             ('BACKGROUND', (0,0), (-1,0), colors.navy),
@@ -196,7 +195,6 @@ else:
         for cod, nome in PRODUTOS_FOCAIS.items():
             if cod in compras_cliente:
                 p_s = buscar_preco_na_tabela(arquivo_preco, cod)
-                # Adicionado coluna de FALTA no data_editor
                 dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
             else:
                 faltantes.append([cod, nome])
