@@ -58,22 +58,33 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- FUNÇÃO TORRE DE CONTROLE (VOLTANDO PARA SECRETS) ---
+# --- FUNÇÃO TORRE DE CONTROLE (CONEXÃO COM PLANILHA) ---
 def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, rupturas, tipo="PADRAO"):
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         
-        # ESSA LINHA BUSCA AS CREDENCIAIS QUE VOCÊ CONFIGUROU NO SITE DO STREAMLIT
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        # Converte os secrets em um dicionário Python comum
+        creds_info = st.secrets["gcp_service_account"]
         
+        # Autorização com o Google Sheets
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(creds_info), scope)
         client = gspread.authorize(creds)
+        
+        # Abre a planilha pelo nome exato
         sheet = client.open("Torre_de_Controle_Mars").sheet1
-        linha = [datetime.now().strftime("%d/%m/%Y %H:%M"), promotor, loja, total_focais, total_comprados, rupturas, tipo]
+        
+        linha = [
+            datetime.now().strftime("%d/%m/%Y %H:%M"), 
+            promotor, 
+            loja, 
+            total_focais, 
+            total_comprados, 
+            rupturas, 
+            tipo
+        ]
         sheet.append_row(linha)
     except Exception as e:
-        # Mostra o erro na barra lateral apenas se você estiver logado para não travar o app
-        st.sidebar.error(f"Erro na Planilha: {e}")
+        st.sidebar.error(f"⚠️ Erro ao salvar na Planilha: {e}")
 
 # --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
@@ -120,11 +131,13 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
         row_colors = []
+        
         for i, row in enumerate(df_audit.to_dict('records')):
             idx = i + 1
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
             p_rec_val = converter_preco(row.get('SUGERIDO', 0.0))
             falta_status = "SIM" if row.get('FALTA NA LOJA?', False) else "NÃO"
+            
             if p_loja == 0:
                 sit = "FALTA"
                 row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
@@ -133,8 +146,11 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 if p_loja > p_rec_val:
                     sit = f"ACIMA (+{perc:.1f}%)"
                     row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
-                else: sit = f"CORRETO ({perc:.1f}%)"
+                else: 
+                    sit = f"CORRETO ({perc:.1f}%)"
+            
             data_audit.append([row.get('PRODUTO', '')[:30], row.get('SUGERIDO', ''), f"R$ {p_loja:.2f}", sit, falta_status])
+            
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
         estilo_t1 = [('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('ALIGN', (1,0), (-1,-1), 'CENTER'), ('FONTSIZE', (0,0), (-1,-1), 9)]
         estilo_t1.extend(row_colors)
@@ -206,10 +222,11 @@ else:
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
                 if enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf):
                     salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes))
-                    st.success("Enviado!"); st.balloons()
+                    st.success("Enviado com sucesso para Minassal!"); st.balloons()
         else:
             feedback_total = st.text_area("🗣️ Justificativa da Falta de Mix Total:")
             if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO"):
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_total)
-                enviar_email(f"🚨 CRÍTICA MIX: {loja}", pdf)
-                st.success("Crítica enviada!")
+                if enviar_email(f"🚨 CRÍTICA MIX: {loja}", pdf):
+                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), 0, len(PRODUTOS_FOCAIS), "CRÍTICA TOTAL")
+                    st.success("Crítica enviada!")
