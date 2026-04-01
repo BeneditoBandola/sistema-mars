@@ -65,21 +65,11 @@ def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, r
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
         client = gspread.authorize(creds)
         sheet = client.open("Torre_de_Controle_Mars").sheet1
-        
-        linha = [
-            datetime.now().strftime("%d/%m/%Y %H:%M"), 
-            promotor, 
-            loja, 
-            total_focais, 
-            total_comprados, 
-            rupturas,
-            tipo
-        ]
+        linha = [datetime.now().strftime("%d/%m/%Y %H:%M"), promotor, loja, total_focais, total_comprados, rupturas, tipo]
         sheet.append_row(linha)
-    except:
-        pass # Se falhar (sem internet), o app não trava
+    except: pass
 
-# --- LISTA MESTRA FOCAL (40 ITENS) ---
+# --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -95,12 +85,8 @@ PRODUTOS_FOCAIS = {
 
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
-    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"],
-    "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"],
-    "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
-    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"],
-    "MADALLA": ["TOCANTINS", "UBA", "RIO POMBA"],
-    "FERNANDA": ["JUIZ DE FORA"]
+    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"], "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
+    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"], "MADALLA": ["TOCANTINS", "UBA", "RIO POMBA"], "FERNANDA": ["JUIZ DE FORA"]
 }
 
 @st.cache_data
@@ -110,62 +96,78 @@ def carregar_vendas():
     df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
     return df
 
-# --- FUNÇÕES PDF E EMAIL ---
-def gerar_pdf_mars(promotor, loja, df_audit, df_faltantes, feedback):
+# --- FUNÇÃO PDF (AJUSTADA EXATAMENTE COMO A IMAGEM) ---
+def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
-    doc = SimpleDocTemplate(nome_arquivo, pagesize=A4)
+    doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos = []
     estilos = getSampleStyleSheet()
-    elementos.append(Paragraph(f"<b>RELATÓRIOS DE OPORTUNIDADES SMALL BAGS E INOVAÇÕES</b>", estilos['Title']))
-    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade}", estilos['Normal'])) # Ajuste implícito para consistência
-    elementos.append(Paragraph(f"<b>PROMOTOR:</b> {promotor}", estilos['Normal']))
-    elementos.append(Paragraph(f"<b>DATA:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilos['Normal']))
-    elementos.append(Spacer(1, 12))
+    
+    # Título
+    estilo_t = estilos['Title']
+    estilo_t.alignment = 1
+    elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilo_t))
+    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade}", estilos['Normal']))
+    elementos.append(Paragraph(f"<b>PROMOTOR:</b> {promotor} | <b>DATA:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilos['Normal']))
+    elementos.append(Spacer(1, 15))
     
     if not df_audit.empty:
-        elementos.append(Paragraph("<b>1. EXECUÇÃO DE GÔNDOLA (ITENS EM PORTFÓLIO)</b>", estilos['Heading3']))
-        data_audit = [["Produto", "Últ. Faturamento", "Preço", "Falta?"]]
-        for r in df_audit.itertuples():
-            status = "🚨 SIM" if r._5 else "NÃO"
-            data_audit.append([r.PRODUTO[:30], r._3, f"R$ {r._6}", status])
-        t1 = Table(data_audit, colWidths=[200, 100, 70, 70])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
-        elementos.append(t1); elementos.append(Spacer(1, 15))
+        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
+        data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
+        row_colors = []
+        for i, r in enumerate(df_audit.itertuples()):
+            idx = i + 1
+            p_loja = float(r._6) # Coluna PREÇO GÔNDOLA
+            p_rec_val = converter_preco(r.SUGERIDO)
+            falta_status = "SIM" if r._5 else "NÃO"
+            
+            if p_loja == 0:
+                sit = "FALTA"
+                row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+            else:
+                perc = ((p_loja - p_rec_val) / p_rec_val) * 100
+                if p_loja > p_rec_val:
+                    sit = f"ACIMA (+{perc:.1f}%)"
+                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                else: sit = f"CORRETO ({perc:.1f}%)"
+            data_audit.append([r.PRODUTO[:30], r.SUGERIDO, f"R$ {p_loja:.2f}", sit, falta_status])
+            
+        t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
+        estilo_t1 = [('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('ALIGN', (1,0), (-1,-1), 'CENTER'), ('FONTSIZE', (0,0), (-1,-1), 9)]
+        estilo_t1.extend(row_colors)
+        t1.setStyle(TableStyle(estilo_t1)); elementos.append(t1); elementos.append(Spacer(1, 15))
 
-    elementos.append(Paragraph("<b>2. RUPTURAS COMERCIAIS (OPORTUNIDADE DE VENDA)</b>", estilos['Heading3']))
-    data_ruptura = [["Código", "Item Focal Não Negativado"]]
-    for r in df_faltantes: data_ruptura.append([r[0], r[1]])
-    t2 = Table(data_ruptura, colWidths=[80, 360])
-    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+    elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
+    data_f = [["Código", "Produto"]]
+    for f in df_faltantes: data_f.append([f[0], f[1]])
+    t2 = Table(data_f, colWidths=[80, 435])
+    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('FONTSIZE', (0,0), (-1,-1), 9)]))
     elementos.append(t2); elementos.append(Spacer(1, 15))
     
-    elementos.append(Paragraph(f"<b>INTELIGÊNCIA DE CAMPO:</b> {feedback}", estilos['Normal']))
-    doc.build(elementos)
-    return nome_arquivo
+    if feedback:
+        elementos.append(Paragraph("<b>OBSERVAÇÕES DO PROMOTOR:</b>", estilos['Heading3']))
+        elementos.append(Paragraph(feedback, estilos['Normal']))
+    doc.build(elementos); return nome_arquivo
 
 def enviar_email(assunto, pdf):
     rem, sen, dest = "beneditobandola@gmail.com", "kfih ccqx cskn oito", "benedito.bandola@minassal.com.br"
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = rem, dest, assunto
-    with open(pdf, "rb") as f:
-        part = MIMEApplication(f.read(), Name=os.path.basename(pdf))
-        part['Content-Disposition'] = f'attachment; filename="{os.path.basename(pdf)}"'
-        msg.attach(part)
     try:
-        s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen)
-        s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
+        with open(pdf, "rb") as f:
+            part = MIMEApplication(f.read(), Name=os.path.basename(pdf))
+            part.add_header('Content-Disposition', 'attachment', filename=os.path.basename(pdf))
+            msg.attach(part)
+        s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen); s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
     except: return False
 
 # --- INTERFACE ---
 df_vendas = carregar_vendas()
-st.title("🐾 RELATÓRIOS DE OPORTUNIDADES")
-
 if 'user_mars' not in st.session_state:
     st.subheader("👤 Selecione o Promotor:")
     cols = st.columns(3)
     for i, nome in enumerate(ROTAS_MARS.keys()):
-        if cols[i % 3].button(nome, key=nome, use_container_width=True):
-            st.session_state.user_mars = nome; st.rerun()
+        if cols[i % 3].button(nome, use_container_width=True): st.session_state.user_mars = nome; st.rerun()
 else:
     promotor = st.session_state.user_mars
     st.sidebar.title(f"Promotor: {promotor}")
@@ -174,50 +176,33 @@ else:
     df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
     cidades_auth = [limpar_texto(c) for c in ROTAS_MARS[promotor]]
     df_f = df_vendas[df_vendas['CIDADE_BUSCA'].isin(cidades_auth)]
-    
     loja = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].unique()))
 
     if loja != "-- Selecione --":
         vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
         unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
-        cidade = vendas_loja.iloc[0]['CIDADE'] # Captura cidade para o PDF
-        
-        if unidade_txt.startswith("1") or unidade_txt.startswith("4"):
-            arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv"
-        else:
-            arquivo_preco = "PAULISTINHAS MARS PREÇO.csv"
-
-        st.sidebar.error(f"🏢 UNIDADE: {unidade_txt}")
-        st.sidebar.info(f"📂 TABELA: {arquivo_preco}")
+        cidade_loja = vendas_loja.iloc[0]['CIDADE']
+        arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
         
         compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
-        dados_audit, faltantes_comerciais = [], []
-
+        dados_audit, faltantes = [], []
         for cod, nome in PRODUTOS_FOCAIS.items():
             if cod in compras_cliente:
-                v_item = vendas_loja[vendas_loja['PRODUTO CODIGO'].astype(str) == cod]
-                u_data = v_item['DATA'].max().strftime('%d/%m/%Y')
                 p_s = buscar_preco_na_tabela(arquivo_preco, cod)
-                dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "ÚLTIMA COMPRA": u_data, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
-            else:
-                faltantes_comerciais.append([cod, nome])
+                dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
+            else: faltantes.append([cod, nome])
 
         if dados_audit:
-            st.write(f"### Auditoria de Portfólio - {loja}")
-            df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "ÚLTIMA COMPRA", "SUGERIDO"])
+            df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
             feedback = st.text_area("🗣️ Opinião/Ponto de Melhoria:")
             if st.button("🚀 FINALIZAR E ENVIAR RELATÓRIO", use_container_width=True):
-                with st.spinner("Enviando..."):
-                    pdf = gerar_pdf_mars(promotor, loja, df_edit, faltantes_comerciais, feedback)
-                    enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf)
-                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes_comerciais), "PADRAO")
-                    st.success("Enviado com sucesso!"); st.balloons()
+                pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
+                if enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf):
+                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes))
+                    st.success("Enviado!"); st.balloons()
         else:
-            st.error("🚨 CRÍTICO: Este cliente não possui NENHUMA compra de itens focais em 2026.")
             feedback_total = st.text_area("🗣️ Justificativa da Falta de Mix Total:")
-            if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO", use_container_width=True):
-                with st.spinner("Gerando crítica..."):
-                    pdf = gerar_pdf_mars(promotor, loja, pd.DataFrame(), faltantes_comerciais, feedback_total)
-                    enviar_email(f"🚨 CRÍTICA MIX TOTAL: {loja}", pdf)
-                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), 0, len(PRODUTOS_FOCAIS), "CRÍTICA TOTAL")
-                    st.success("Crítica de Mix Total enviada!"); st.balloons()
+            if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO"):
+                pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_total)
+                enviar_email(f"🚨 CRÍTICA MIX: {loja}", pdf)
+                st.success("Crítica enviada!")
