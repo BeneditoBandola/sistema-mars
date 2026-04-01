@@ -6,7 +6,7 @@ import smtplib
 import csv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta # Adicionado timedelta para o ajuste de hora
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -36,7 +36,6 @@ st.markdown("""
 
 # --- FUNÇÕES DE AUXÍLIO ---
 def obter_horario_brasil():
-    # Ajusta o horário do servidor (UTC) para Brasília (UTC-3)
     return (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
 
 def limpar_texto(txt):
@@ -62,18 +61,32 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- FUNÇÃO TORRE DE CONTROLE ---
-def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, rupturas, tipo="PADRAO"):
+# --- FUNÇÃO TORRE DE CONTROLE (RESUMO + DETALHADO) ---
+def salvar_na_torre_de_controle(promotor, loja, cidade, unidade, total_focais, total_comprados, rupturas, lista_faltantes, tipo="PADRAO"):
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds_info = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(creds_info), scope)
         client = gspread.authorize(creds)
-        sheet = client.open("Torre_de_Controle_Mars").sheet1
         
-        # Uso da função de horário corrigido aqui
-        linha = [obter_horario_brasil(), promotor, loja, total_focais, total_comprados, rupturas, tipo]
-        sheet.append_row(linha)
+        # 1. SALVAR RESUMO (Aba 1 - Página 1)
+        sheet_resumo = client.open("Torre_de_Controle_Mars").sheet1
+        linha_resumo = [obter_horario_brasil(), promotor, loja, total_focais, total_comprados, rupturas, tipo]
+        sheet_resumo.append_row(linha_resumo)
+        
+        # 2. SALVAR DETALHADO (Aba 2 - Oportunidades_Detalhadas)
+        try:
+            sheet_detalhe = client.open("Torre_de_Controle_Mars").worksheet("Oportunidades_Detalhadas")
+            novas_linhas = []
+            agora = obter_horario_brasil()
+            for item in lista_faltantes:
+                novas_linhas.append([agora, promotor, loja, cidade, item[0], item[1], "Pendente"])
+            
+            if novas_linhas:
+                sheet_detalhe.append_rows(novas_linhas)
+        except Exception as e_aba:
+            st.sidebar.warning(f"Aviso: Aba de detalhes não encontrada.")
+
     except Exception as e:
         st.sidebar.error(f"Erro na Planilha: {e}")
 
@@ -185,19 +198,24 @@ else:
             if cod in compras_cliente:
                 p_s = buscar_preco_na_tabela(arquivo_preco, cod)
                 dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
-            else: faltantes.append([cod, nome])
+            else: 
+                faltantes.append([cod, nome])
 
         if dados_audit:
             df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
             feedback = st.text_area("🗣️ Opinião/Ponto de Melhoria:")
             if st.button("🚀 FINALIZAR E ENVIAR RELATÓRIO", use_container_width=True):
+                rupturas_fisicas = df_edit[df_edit['FALTA NA LOJA?'] == True][['CÓDIGO', 'PRODUTO']].values.tolist()
+                lista_oportunidades = faltantes + rupturas_fisicas
+                
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
                 if enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf):
-                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes))
-                    st.success("Enviado com sucesso para Minassal!"); st.balloons()
+                    salvar_na_torre_de_controle(promotor, loja, cidade_loja, unidade_txt, len(PRODUTOS_FOCAIS), len(dados_audit), len(lista_oportunidades), lista_oportunidades)
+                    st.success("Enviado com sucesso!"); st.balloons()
         else:
             feedback_total = st.text_area("🗣️ Justificativa da Falta de Mix Total:")
             if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO"):
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_total)
-                enviar_email(f"🚨 CRÍTICA MIX: {loja}", pdf)
-                st.success("Crítica enviada!")
+                if enviar_email(f"🚨 CRÍTICA MIX: {loja}", pdf):
+                    salvar_na_torre_de_controle(promotor, loja, cidade_loja, unidade_txt, len(PRODUTOS_FOCAIS), 0, len(PRODUTOS_FOCAIS), faltantes, "CRÍTICA TOTAL")
+                    st.success("Crítica enviada!")
