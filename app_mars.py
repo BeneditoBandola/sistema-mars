@@ -99,7 +99,7 @@ ROTAS_MARS = {
     "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"],
     "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
     "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"],
-    "MADALLA": ["TOCANTINS", "UBA"],
+    "MADALLA": ["TOCANTINS", "UBA", "RIO POMBA"],
     "FERNANDA": ["JUIZ DE FORA"]
 }
 
@@ -117,7 +117,8 @@ def gerar_pdf_mars(promotor, loja, df_audit, df_faltantes, feedback):
     elementos = []
     estilos = getSampleStyleSheet()
     elementos.append(Paragraph(f"<b>RELATÓRIOS DE OPORTUNIDADES SMALL BAGS E INOVAÇÕES</b>", estilos['Title']))
-    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
+    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade}", estilos['Normal'])) # Ajuste implícito para consistência
+    elementos.append(Paragraph(f"<b>PROMOTOR:</b> {promotor}", estilos['Normal']))
     elementos.append(Paragraph(f"<b>DATA:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilos['Normal']))
     elementos.append(Spacer(1, 12))
     
@@ -179,6 +180,7 @@ else:
     if loja != "-- Selecione --":
         vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
         unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
+        cidade = vendas_loja.iloc[0]['CIDADE'] # Captura cidade para o PDF
         
         if unidade_txt.startswith("1") or unidade_txt.startswith("4"):
             arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv"
