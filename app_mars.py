@@ -114,11 +114,13 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
         row_colors = []
-        for i, r in enumerate(df_audit.itertuples()):
+        
+        # Correção aqui: acessando pelo nome da coluna em vez do índice fixo
+        for i, row in enumerate(df_audit.to_dict('records')):
             idx = i + 1
-            p_loja = float(r._6)
-            p_rec_val = converter_preco(r.SUGERIDO)
-            falta_status = "SIM" if r._5 else "NÃO"
+            p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
+            p_rec_val = converter_preco(row.get('SUGERIDO', 0.0))
+            falta_status = "SIM" if row.get('FALTA NA LOJA?', False) else "NÃO"
             
             if p_loja == 0:
                 sit = "FALTA"
@@ -128,8 +130,10 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 if p_loja > p_rec_val:
                     sit = f"ACIMA (+{perc:.1f}%)"
                     row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
-                else: sit = f"CORRETO ({perc:.1f}%)"
-            data_audit.append([r.PRODUTO[:30], r.SUGERIDO, f"R$ {p_loja:.2f}", sit, falta_status])
+                else: 
+                    sit = f"CORRETO ({perc:.1f}%)"
+            
+            data_audit.append([row.get('PRODUTO', '')[:30], row.get('SUGERIDO', ''), f"R$ {p_loja:.2f}", sit, falta_status])
             
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
         estilo_t1 = [('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('ALIGN', (1,0), (-1,-1), 'CENTER'), ('FONTSIZE', (0,0), (-1,-1), 9)]
@@ -183,7 +187,6 @@ else:
         cidade_loja = vendas_loja.iloc[0]['CIDADE']
         arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
         
-        # --- EXIBIÇÃO CONSTANTE DO ARQUIVO DE TABELA ---
         st.sidebar.markdown("---")
         st.sidebar.write(f"🏢 **UNIDADE:** {unidade_txt}")
         st.sidebar.write(f"📂 **TABELA ATIVA:** {arquivo_preco}")
