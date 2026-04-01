@@ -96,14 +96,13 @@ def carregar_vendas():
     df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
     return df
 
-# --- FUNÇÃO PDF (AJUSTADA EXATAMENTE COMO A IMAGEM) ---
+# --- FUNÇÃO PDF ---
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos = []
     estilos = getSampleStyleSheet()
     
-    # Título
     estilo_t = estilos['Title']
     estilo_t.alignment = 1
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilo_t))
@@ -117,7 +116,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         row_colors = []
         for i, r in enumerate(df_audit.itertuples()):
             idx = i + 1
-            p_loja = float(r._6) # Coluna PREÇO GÔNDOLA
+            p_loja = float(r._6)
             p_rec_val = converter_preco(r.SUGERIDO)
             falta_status = "SIM" if r._5 else "NÃO"
             
@@ -183,6 +182,11 @@ else:
         unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
         cidade_loja = vendas_loja.iloc[0]['CIDADE']
         arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv" if (unidade_txt.startswith("1") or unidade_txt.startswith("4")) else "PAULISTINHAS MARS PREÇO.csv"
+        
+        # --- EXIBIÇÃO CONSTANTE DO ARQUIVO DE TABELA ---
+        st.sidebar.markdown("---")
+        st.sidebar.write(f"🏢 **UNIDADE:** {unidade_txt}")
+        st.sidebar.write(f"📂 **TABELA ATIVA:** {arquivo_preco}")
         
         compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
         dados_audit, faltantes = [], []
