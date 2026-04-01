@@ -1,370 +1,221 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from PIL import Image
 import os
-import json
-import base64
-import re
-import time
-from datetime import datetime, date, timedelta
+import unicodedata
+import smtplib
+import csv
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 
-# --- 1. CONFIGURAÇÕES E CONSTANTES ---
-st.set_page_config(page_title="Minassal Performance V10.8", layout="wide", page_icon="🐾")
+# Bibliotecas para a criação do PDF
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
-CONFIG_FILE = "config_metas_minassal.json"
-PASTA_FOTOS = r'C:\Users\Benedito\OneDrive - Minassal\Área de Trabalho\TODOS OS MEUS SCRIPTS\AREA DE LEITURAS\fotos promotores'
+# --- CONFIGURAÇÃO VISUAL ---
+st.set_page_config(page_title="MARS - Oportunidades", page_icon="🐾", layout="wide")
 
-DATA_INICIO_P2 = date(2026, 1, 25)
-DATA_FIM_P2 = date(2026, 2, 21)
-FERIADOS_P2 = [date(2026, 2, 16), date(2026, 2, 17)]
-
-FILIAIS = [
-    "Minassal Ltda - Pocos de Caldas", 
-    "Minassal Ltda - Sao Joao da Boa Vista",
-    "Minassal Ltda - Sao Jose do Rio Preto", 
-    "Minassal Ltda - Juiz de Fora"
-]
-
-ITENS_P = ["Small Bags", "Ponto Extra de Sachês/Petiscos"]
-ITENS_S = ["Combos Virtuais Sachês (KiteKat, Champ, Optimum)", "Reset Whiskas Sachês", "Combos Virtuais Petiscos"]
-TODOS_ITENS = ITENS_P + ITENS_S
-
-# ADICIONADO RIO POMBA PARA MADALLA
-ROTAS_PROMOTORES_MAPA = {
-    "Pamela": ["POCOS DE CALDAS", "POÇOS DE CALDAS", "ANDRADAS", "VARGINHA", "TRES CORACOES", "TRÊS CORAÇÕES", "TRES PONTAS", "TRÊS PONTAS", "ITAJUBA", "ITAJUBÁ", "POUSO ALEGRE"],
-    "Fernanda": ["JUIZ DE FORA", "JUIZ DE FORA/MG"],
-    "Madalla": ["TOCANTINS", "UBA", "UBÁ", "RIO POMBA"]
-}
-
-# --- LISTA MESTRA TOP REDES ---
-TOP_40_REDES_DATA = [
-    ("53869565000176", "Juiz de Fora", "BIGPETS BRASIL LTDA"), ("01986278000142", "Juiz de Fora", "BARBARA FELIPPE COMERCIAL LTDA"),
-    ("09412225000120", "Juiz de Fora", "A F MARTINS COMERCIO DE PET SHOP LTDA"), ("32623953000100", "Juiz de Fora", "RACOES RIO BRANCO LTDA"),
-    ("68546597000108", "Juiz de Fora", "PURIMAX COMERCIO DE RACOES LTDA"), ("57235001000132", "Juiz de Fora", "RODRIGO CASTRO FRIZZERO AGROPECUARIA LTDA"),
-    ("31635090000110", "Juiz de Fora", "AGROPECUARIA RIANELLI E BONOTO LTDA"), ("17678897000100", "Juiz de Fora", "AGROTELA COMERCIAL LTDA"),
-    ("21908494000187", "Juiz de Fora", "VETERINARIA MENDES ANDRADE LTDA"), ("43236258000102", "Juiz de Fora", "AGROPECUARIA E ELETRICA ROCHEDO COMERCIO LTDA"),
-    ("02819934000185", "Pocos de Caldas", "DAVIDBEL ARTIGOS PARA ANIMAIS LTDA"), ("00842760000146", "Pocos de Caldas", "UNIAO AGROPECUARIA LTDA-CASA DO CRIADOR"),
-    ("00423316000196", "Pocos de Caldas", "CREMILSON HENRIQUE FREITAS"), ("04162718000135", "Pocos de Caldas", "ADEMIR APARECIDO CONSTANTINO"),
-    ("18946575000167", "Pocos de Caldas", "E-PET LTDA"), ("14526185000187", "Pocos de Caldas", "MARCOS CONSENTINO"),
-    ("42921080000168", "Pocos de Caldas", "AGRO SANTO ANTONIO LTDA"), ("15865670000148", "Pocos de Caldas", "AGROPECUARIA SANTA EDWIGES COMERCIAL LTDA"),
-    ("04795218000130", "Pocos de Caldas", "COMERCIAL MARITAN YANO LTDA"), ("47214882000151", "Pocos de Caldas", "ARMAZEM DAS RACOES LTDA"),
-    ("10221584000189", "Sao Joao da Boa Vista", "MORAES & SILVA RACOES LTDA"), ("36667802000105", "Sao Joao da Boa Vista", "EES PET SHOP COM DE PRODS E ANIMAIS DE ESTIM LTDA"),
-    ("02457700000135", "Sao Joao da Boa Vista", "CORRAL COMERCIO DE RACOES LTDA EPP"), ("13062215000189", "Sao Joao da Boa Vista", "AMOPETS LTDA"),
-    ("30872481000196", "Sao Joao da Boa Vista", "CENTER SHOP DO ANIMAL LTDA"), ("05095810000192", "Sao Joao da Boa Vista", "ABBADE & REIS LTDA"),
-    ("27543687000168", "Sao Joao da Boa Vista", "CASA DO BOI COMERCIAL DE PRODUTOS VETERINARIOS LTDA"), ("58913834000178", "Sao Joao da Boa Vista", "AGROMIL PRODUTOS VETERINARIOS LTDA"),
-    ("07831582000105", "Sao Joao da Boa Vista", "BIVETER COMERCIO DE PRODUTOS AGROPECUARIOS LTDA"), ("03022826000140", "Sao Joao da Boa Vista", "AGRO CORBI SEMENTES RACOES LTDA"),
-    ("26591656000110", "Sao Jose do Rio Preto", "A C DA SILVA RUIZ & CIA LTDA"), ("23124236000135", "Sao Jose do Rio Preto", "GROUP FUKUJU LTDA"),
-    ("20809189000175", "Sao Jose do Rio Preto", "FRS FERREIRA RACOES"), ("31008497000118", "Sao Jose do Rio Preto", "NUTRIAL PET CENTER COMERCIO DE RACOES LTDA"),
-    ("21711126000144", "Sao Jose do Rio Preto", "B H LISBOA DA ROCHA LTDA"), ("01781155000175", "Sao Jose do Rio Preto", "FAFER COM PROD P ANIMAIS E AVES LTDA"),
-    ("39412328000150", "Sao Jose do Rio Preto", "AGROPET RACOES Rio PRETO LTDA"), ("14921961000143", "Sao Jose do Rio Preto", "PET CENTER REGISSOL LTDA"),
-    ("10370253000100", "Sao Jose do Rio Preto", "DPET & UD COMERCIAL LTDA ME"), ("43602619000189", "Sao Jose do Rio Preto", "FRANCIELE DE OLIVEIRA TEIXEIRA 38870462854")
-]
-
-# --- 2. FUNÇÕES DE BACKEND ---
-@st.cache_data
-def carregar_dados(uploaded_file):
-    try:
-        df = pd.read_csv(uploaded_file, sep=';', encoding='latin1')
-        if len(df.columns) < 2:
-            uploaded_file.seek(0)
-            df = pd.read_csv(uploaded_file, sep=',', encoding='utf-8')
-        df.columns = df.columns.str.strip().str.title()
-        mapa = {'Filial': 'Distribuidor', 'Promotor': 'Usuario', 'Pergunta': 'Item', 'Resposta': 'Status', 'Question': 'Item', 'Answer': 'Status', 'User': 'Usuario'}
-        df.rename(columns=mapa, inplace=True)
-        if 'Item' in df.columns:
-            df['Item'] = df['Item'].replace({'Rebaixa Whiskas sache': 'Reset Whiskas Sachês', 'Reset Whiskas Sache': 'Reset Whiskas Sachês', 'rebaixa whiskas sache': 'Reset Whiskas Sachês'})
-        return df
-    except Exception as e:
-        st.error(f"Erro ao ler CSV: {e}")
-        return None
-
-def limpar_cnpj(v):
-    if pd.isna(v): return ""
-    return re.sub(r'\D', '', str(v).upper().replace("CNPJ", "")).zfill(14)
-
-def calcular_dias_uteis_restantes():
-    hoje = date.today()
-    if hoje < DATA_INICIO_P2: data_ref = DATA_INICIO_P2
-    elif hoje > DATA_FIM_P2: return 0
-    else: data_ref = hoje
-    dias = 0; c = data_ref
-    while c <= DATA_FIM_P2:
-        if c.weekday() < 5 and c not in FERIADOS_P2: dias += 1
-        c += timedelta(days=1)
-    return dias
-
-def carregar_configuracoes():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get("metas", {})
-        except: return {}
-    return {}
-
-def salvar_configuracoes(metas):
-    try:
-        dados_atuais = {}
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, 'r', encoding='utf-8') as f: dados_atuais = json.load(f)
-            except: pass
-        dados_atuais["metas"] = metas
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(dados_atuais, f, indent=4)
-    except Exception as e: st.error(f"Erro ao salvar: {e}")
-
-def obter_foto_promotor(nome):
-    if not os.path.exists(PASTA_FOTOS): return "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-    if not isinstance(nome, str): return "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-    nome_limpo = nome.strip()
-    for ext in ['.jpg', '.jpeg', '.png', '.JPG', '.PNG']:
-        teste = os.path.join(PASTA_FOTOS, nome_limpo + ext)
-        if os.path.exists(teste): return Image.open(teste)
-    return "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-
-# --- 3. ESTILOS CSS ---
 st.markdown("""
-<style>
-    [data-testid="stAppViewContainer"] { background-color: #e2e8f0; }
-    [data-testid="stHeader"] { background-color: #e2e8f0; }
-    [data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #cbd5e1; }
-    h1, h2, h3, h4, p, label, strong, b { color: #000000 !important; font-family: 'Segoe UI', sans-serif; }
-    div[data-baseweb="select"] > div { background-color: #ffffff !important; color: #000000 !important; }
-    .profile-card { background-color: white; padding: 20px; border-radius: 15px; text-align: center; border-top: 5px solid #2563eb; color: #000; }
-    .item-box { background-color: white; border-radius: 12px; padding: 15px; border: 1px solid #cbd5e1; margin-bottom: 10px; color: #000; }
-    .pill-ok { background-color: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 12px; font-weight: bold; }
-    .pill-pend { background-color: #ffedd5; color: #9a3412; padding: 4px 8px; border-radius: 12px; font-weight: bold; }
-    .pill-zero { background-color: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 12px; font-weight: bold; }
-    .row-whiskas { display: flex; align-items: center; background: white; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #8b5cf6; color: #000; }
-    .num-whiskas { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-    .filial-header { background-color: #1e3a8a; color: white !important; padding: 10px 20px; border-radius: 10px 10px 0 0; margin-top: 20px; font-size: 18px; font-weight: bold; }
-    .filial-stats { background-color: white; border: 1px solid #cbd5e1; border-top: none; padding: 15px; border-radius: 0 0 10px 10px; margin-bottom: 10px; display: flex; justify-content: space-around; }
-    .stat-box { text-align: center; }
-    .stat-label { font-size: 12px; color: #64748b; font-weight: bold; text-transform: uppercase; }
-    .stat-value { font-size: 20px; font-weight: bold; color: #1e293b; }
-    .promo-row { display: flex; align-items: center; background: white; padding: 8px; margin-bottom: 5px; border-radius: 8px; border: 1px solid #e2e8f0; color: #000; }
-</style>
+    <style>
+    .stApp { background-color: #001F3F; color: #FFD700; }
+    div.stButton > button {
+        height: 60px; font-size: 18px; font-weight: bold; border-radius: 10px;
+        border: 3px solid #FF00FF; color: #001F3F; background-color: #FFD700;
+        margin-bottom: 10px;
+    }
+    div.stButton > button:hover { background-color: #FF00FF; color: white; }
+    .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
+    h1, h2, h3 { color: #FFD700 !important; }
+    </style>
 """, unsafe_allow_html=True)
 
-# --- 4. INTERFACE PRINCIPAL ---
+# --- FUNÇÕES DE AUXÍLIO ---
+def limpar_texto(txt):
+    if pd.isna(txt): return ""
+    txt = str(txt).upper().strip()
+    return "".join(c for c in unicodedata.normalize('NFKD', txt) if not unicodedata.combining(c))
 
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2328/2328966.png", width=50)
-    st.title("Minassal Pro")
-    pagina = st.radio("Navegação:", [
-        "👥 Painel Detalhado (Cards)", 
-        "📊 Visão Geral (Gráficos)", 
-        "📉 Análise Whiskas Sache", 
-        "🎯 Metas por Item (Detelhado)", 
-        "🏆 Ranking Consolidado (Geral)", 
-        "📊 Aprovado e Pendente vs Meta",
-        "📍 Leituras Clientes TOP REDES"
-    ])
-    st.markdown("---")
-    st.header("📂 Arquivo")
-    arquivo = st.file_uploader("Carregar CSV", type=["csv"])
-    st.markdown("---")
-    st.subheader("🎯 Metas")
-    metas_dict = carregar_configuracoes()
-    
-    with st.expander("Editar Metas", expanded=False):
-        filial_meta_sel = st.selectbox("Filial:", FILIAIS)
-        metas_f = metas_dict.get(filial_meta_sel, {})
-        with st.form("form_metas"):
-            st.write(f"**Editando: {filial_meta_sel.split('-')[-1]}**")
-            novas_metas = {}
-            for item in TODOS_ITENS:
-                key_unique = f"in_{filial_meta_sel}_{item}" 
-                val = st.number_input(f"{item}", value=int(metas_f.get(item, 0)), min_value=0, step=1, key=key_unique)
-                novas_metas[item] = val
-            submitted = st.form_submit_button("💾 SALVAR METAS", type="primary")
-            if submitted:
-                metas_dict[filial_meta_sel] = novas_metas
-                salvar_configuracoes(metas_dict)
-                st.toast("✅ Metas salvas com sucesso!")
-                time.sleep(0.5)
-                st.rerun()
+def converter_preco(valor):
+    if pd.isna(valor) or valor == "": return 0.0
+    try:
+        v = str(valor).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".").strip()
+        return float(v)
+    except: return 0.0
 
-if arquivo:
-    df = carregar_dados(arquivo)
-    if df is not None:
-        col_filial, col_promotor, col_item, col_status = 'Distribuidor', 'Usuario', 'Item', 'Status'
-        df[col_status] = df[col_status].fillna("")
+def buscar_preco_na_tabela(arquivo, codigo_produto):
+    if not os.path.exists(arquivo): return 0.0
+    try:
+        df_p = pd.read_csv(arquivo, sep=';', encoding='utf-8-sig', on_bad_lines='skip')
+        df_p.columns = [c.strip().upper() for c in df_p.columns]
+        row = df_p[df_p['CÓDIGO'].astype(str).str.strip() == str(codigo_produto).strip()]
+        if not row.empty:
+            return converter_preco(row.iloc[0]['PREÇO RECOMENDADO'])
+    except: pass
+    return 0.0
+
+# --- FUNÇÃO TORRE DE CONTROLE ---
+def salvar_na_torre_de_controle(promotor, loja, total_focais, total_comprados, rupturas, tipo="PADRAO"):
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
+        client = gspread.authorize(creds)
+        sheet = client.open("Torre_de_Controle_Mars").sheet1
         
-        if pagina == "👥 Painel Detalhado (Cards)":
-            c1, c2 = st.columns([3,1])
-            c1.markdown("## 🚀 Painel de Execução")
-            c2.markdown(f"**Dias Úteis Restantes: {calcular_dias_uteis_restantes()}**")
-            filial_sel = st.selectbox("Selecione a Filial:", FILIAIS)
-            st.markdown("---")
-            df_f = df[df[col_filial].str.contains(filial_sel.split('-')[-1].strip(), case=False, na=False)]
-            metas_f = metas_dict.get(filial_sel, {})
-            tot_apr = len(df_f[df_f[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)])
-            tot_pen = len(df_f[df_f[col_status].str.contains('Pendente', case=False, na=False)])
-            meta_tot = sum(metas_f.values())
-            falta = max(0, meta_tot - tot_apr)
-            k1, k2, k3, k4 = st.columns(4)
-            def kpi(col, lbl, val, color="#3b82f6"):
-                col.markdown(f"<div style='background:white;padding:15px;border-radius:10px;border-bottom:4px solid {color};text-align:center;'><div>{lbl}</div><div style='font-size:24px;font-weight:bold;color:{color}'>{val}</div></div>", unsafe_allow_html=True)
-            kpi(k1, "Meta Filial", meta_tot); kpi(k2, "Realizado", tot_apr, "#16a34a"); kpi(k3, "Pendente", tot_pen, "#d97706"); kpi(k4, "Falta Equipe", falta, "#dc2626")
-            resumo_dados = []
-            falta_item = {}
-            for it in TODOS_ITENS:
-                m = metas_f.get(it, 0)
-                r = len(df_f[(df_f[col_item]==it) & (df_f[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False))])
-                p = len(df_f[(df_f[col_item]==it) & (df_f[col_status].str.contains('Pendente', case=False, na=False))])
-                f_val = max(0, m - r)
-                falta_item[it] = f_val
-                resumo_dados.append({"Item": it, "Meta": m, "Realizado (Apr)": r, "Pendente": p, "Falta": f_val})
-            st.dataframe(pd.DataFrame(resumo_dados), use_container_width=True, hide_index=True)
-            st.markdown("---")
-            promotores = df_f[col_promotor].unique()
-            for promotor in promotores:
-                df_p = df_f[df_f[col_promotor] == promotor]
-                col_perfil, col_grid = st.columns([1, 4])
-                with col_perfil:
-                    st.image(obter_foto_promotor(promotor), width=100)
-                    p_apr = len(df_p[df_p[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)])
-                    p_pen = len(df_p[df_p[col_status].str.contains('Pendente', case=False, na=False)])
-                    st.markdown(f"<div class='profile-card'><b>{promotor}</b><br>✅ {p_apr} | ⚠️ {p_pen}</div>", unsafe_allow_html=True)
-                with col_grid:
-                    cols_itens = st.columns(3)
-                    for i, item in enumerate(TODOS_ITENS):
-                        with cols_itens[i % 3]:
-                            d_i = df_p[df_p[col_item] == item]
-                            q_ok = len(d_i[d_i[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)])
-                            q_pd = len(d_i[d_i[col_status].str.contains('Pendente', case=False, na=False)])
-                            f_eq = falta_item.get(item, 0)
-                            html_status = f"<span class='pill-ok'>OK: {q_ok}</span>" if q_ok > 0 else f"<span class='pill-zero'>Zerado</span>"
-                            html_status += f" <span class='pill-pend'>Pend: {q_pd}</span>"
-                            meta_style = "background-color:#eff6ff;color:#2563eb" if f_eq > 0 else "background-color:#f0fdf4;color:#16a34a"
-                            meta_txt = f"🎯 FALTA: {f_eq}" if f_eq > 0 else "🎉 META BATIDA!"
-                            st.markdown(f"<div class='item-box'><b>{item}</b><br>{html_status}<div style='margin-top:5px;padding:3px;border-radius:5px;text-align:center;font-size:12px;font-weight:bold;{meta_style}'>{meta_txt}</div></div>", unsafe_allow_html=True)
-                st.markdown("---")
+        linha = [
+            datetime.now().strftime("%d/%m/%Y %H:%M"), 
+            promotor, 
+            loja, 
+            total_focais, 
+            total_comprados, 
+            rupturas,
+            tipo
+        ]
+        sheet.append_row(linha)
+    except:
+        pass # Se falhar (sem internet), o app não trava
 
-        elif pagina == "📊 Visão Geral (Gráficos)":
-            st.markdown("## 📊 Comparativo Visual")
-            st.markdown("---")
-            c1, c2 = st.columns(2); c3, c4 = st.columns(2); grids = [c1, c2, c3, c4]
-            for idx, fil in enumerate(FILIAIS):
-                with grids[idx] if idx < 4 else st.container():
-                    nome_f = fil.split('-')[-1].strip()
-                    st.markdown(f"### {nome_f}")
-                    df_g = df[df[col_filial].str.contains(nome_f, case=False, na=False)]
-                    mt_g = metas_dict.get(fil, {})
-                    x_ax, y_mt, y_rl, y_pe = [], [], [], []
-                    for it in TODOS_ITENS:
-                        x_ax.append(it[:10]+".."); y_mt.append(mt_g.get(it,0))
-                        y_rl.append(len(df_g[(df_g[col_item]==it) & (df_g[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False))]))
-                        y_pe.append(len(df_g[(df_g[col_item]==it) & (df_g[col_status].str.contains('Pendente', case=False, na=False))]))
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(x=x_ax, y=y_mt, name='Meta', marker_color='#93c5fd'))
-                    fig.add_trace(go.Bar(x=x_ax, y=y_rl, name='Aprovados', marker_color='#15803d'))
-                    fig.add_trace(go.Bar(x=x_ax, y=y_pe, name='Pendentes', marker_color='#d97706'))
-                    fig.update_layout(height=250, margin=dict(t=10,b=10,l=10,r=10), barmode='group'); st.plotly_chart(fig, use_container_width=True)
-                    st.markdown("---")
+# --- LISTA MESTRA FOCAL (40 ITENS) ---
+PRODUTOS_FOCAIS = {
+    "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
+    "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
+    "98985": "CHAMP ADULTO CARNE & CEREAL 900G", "98980": "CHAMP FILHOTES 900G", "98679": "KITEKAT DRY AD MIX DE CARNES 900G",
+    "99777": "PED TASTY BITES CARNE 130G", "99776": "PED TASTY BITES CARNE 40G", "99773": "PED TASTY BITES CARNE 80G", "99774": "PED TASTY BITES FRANGO 80G", "99775": "PED TASTY BITES LEITE 80G",
+    "99830": "SHE CRE AT&SAL+FGO&CAM 4X12G", "99742": "SHE CRE ATUM 2X12G", "99743": "SHE CRE ATUM 4X12G", "99744": "SHE CRE ATUM&AT+CAM 4X12G", "99831": "SHE CRE FGO&SAL 2X12G", "99745": "SHE CRE FRG&FRG+PE 4X12G",
+    "98989": "PED NUTRICAO ESSENCIAL AO LEITE 900G", "98982": "PED NUTRICAO ESSENCIAL CARNE 900G", "98933": "PEDIGREE AD CARNE&FRANG 2,7KG", "98934": "PEDIGREE AD CARNE&FRANG 900G",
+    "98914": "PEDIGREE AD CARNE&VEG 2,7KG", "98915": "PEDIGREE AD CARNE&VEG 900G", "98911": "PEDIGREE AD RP 2,7KG", "98912": "PEDIGREE AD RP 900G",
+    "98930": "PEDIGREE FIL 2,7KG", "98931": "PEDIGREE FIL 900G", "98899": "WHI AD CARNE 500G", "98898": "WHI AD CARNE 900G", "98941": "WHI AD FRANGO 900G",
+    "98937": "WHI AD PEIXE 500G", "98936": "WHI AD PEIXE 900G", "98944": "WHI FILHOTES CARNE 500G", "98942": "WHI FILHOTES CARNE 900G",
+    "98903": "WHI GATO CAST CARNE 500G", "98902": "WHI GATO CAST CARNE 900G", "98946": "WHI GATOS CAST PEIXE 900G"
+}
 
-        elif pagina == "📉 Análise Whiskas Sache":
-            st.markdown("## 📉 Detalhe: Whiskas Sachê")
-            itens_unicos = df[col_item].unique(); idx_w = list(itens_unicos).index("Reset Whiskas Sachês") if "Reset Whiskas Sachês" in itens_unicos else 0
-            item_selecionado = st.selectbox("Selecione o Item:", itens_unicos, index=idx_w)
-            st.markdown("---")
-            df_w = df[df[col_item] == item_selecionado]
-            if df_w.empty: st.warning("Nenhum dado encontrado.")
+ROTAS_MARS = {
+    "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
+    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"],
+    "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"],
+    "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
+    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"],
+    "MADALLA": ["TOCANTINS", "UBA"],
+    "FERNANDA": ["JUIZ DE FORA"]
+}
+
+@st.cache_data
+def carregar_vendas():
+    df = pd.read_csv("Vendas_Mars.csv", sep=None, engine='python', encoding='utf-8-sig')
+    df.columns = [c.strip().upper() for c in df.columns]
+    df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
+    return df
+
+# --- FUNÇÕES PDF E EMAIL ---
+def gerar_pdf_mars(promotor, loja, df_audit, df_faltantes, feedback):
+    nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
+    doc = SimpleDocTemplate(nome_arquivo, pagesize=A4)
+    elementos = []
+    estilos = getSampleStyleSheet()
+    elementos.append(Paragraph(f"<b>RELATÓRIOS DE OPORTUNIDADES SMALL BAGS E INOVAÇÕES</b>", estilos['Title']))
+    elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
+    elementos.append(Paragraph(f"<b>DATA:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilos['Normal']))
+    elementos.append(Spacer(1, 12))
+    
+    if not df_audit.empty:
+        elementos.append(Paragraph("<b>1. EXECUÇÃO DE GÔNDOLA (ITENS EM PORTFÓLIO)</b>", estilos['Heading3']))
+        data_audit = [["Produto", "Últ. Faturamento", "Preço", "Falta?"]]
+        for r in df_audit.itertuples():
+            status = "🚨 SIM" if r._5 else "NÃO"
+            data_audit.append([r.PRODUTO[:30], r._3, f"R$ {r._6}", status])
+        t1 = Table(data_audit, colWidths=[200, 100, 70, 70])
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+        elementos.append(t1); elementos.append(Spacer(1, 15))
+
+    elementos.append(Paragraph("<b>2. RUPTURAS COMERCIAIS (OPORTUNIDADE DE VENDA)</b>", estilos['Heading3']))
+    data_ruptura = [["Código", "Item Focal Não Negativado"]]
+    for r in df_faltantes: data_ruptura.append([r[0], r[1]])
+    t2 = Table(data_ruptura, colWidths=[80, 360])
+    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+    elementos.append(t2); elementos.append(Spacer(1, 15))
+    
+    elementos.append(Paragraph(f"<b>INTELIGÊNCIA DE CAMPO:</b> {feedback}", estilos['Normal']))
+    doc.build(elementos)
+    return nome_arquivo
+
+def enviar_email(assunto, pdf):
+    rem, sen, dest = "beneditobandola@gmail.com", "kfih ccqx cskn oito", "benedito.bandola@minassal.com.br"
+    msg = MIMEMultipart()
+    msg['From'], msg['To'], msg['Subject'] = rem, dest, assunto
+    with open(pdf, "rb") as f:
+        part = MIMEApplication(f.read(), Name=os.path.basename(pdf))
+        part['Content-Disposition'] = f'attachment; filename="{os.path.basename(pdf)}"'
+        msg.attach(part)
+    try:
+        s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen)
+        s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
+    except: return False
+
+# --- INTERFACE ---
+df_vendas = carregar_vendas()
+st.title("🐾 RELATÓRIOS DE OPORTUNIDADES")
+
+if 'user_mars' not in st.session_state:
+    st.subheader("👤 Selecione o Promotor:")
+    cols = st.columns(3)
+    for i, nome in enumerate(ROTAS_MARS.keys()):
+        if cols[i % 3].button(nome, key=nome, use_container_width=True):
+            st.session_state.user_mars = nome; st.rerun()
+else:
+    promotor = st.session_state.user_mars
+    st.sidebar.title(f"Promotor: {promotor}")
+    if st.sidebar.button("Sair"): del st.session_state.user_mars; st.rerun()
+
+    df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
+    cidades_auth = [limpar_texto(c) for c in ROTAS_MARS[promotor]]
+    df_f = df_vendas[df_vendas['CIDADE_BUSCA'].isin(cidades_auth)]
+    
+    loja = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].unique()))
+
+    if loja != "-- Selecione --":
+        vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
+        unidade_txt = str(vendas_loja.iloc[0, 0]).upper()
+        
+        if unidade_txt.startswith("1") or unidade_txt.startswith("4"):
+            arquivo_preco = "MINEIROS PREÇOS MARS COMPLETO.csv"
+        else:
+            arquivo_preco = "PAULISTINHAS MARS PREÇO.csv"
+
+        st.sidebar.error(f"🏢 UNIDADE: {unidade_txt}")
+        st.sidebar.info(f"📂 TABELA: {arquivo_preco}")
+        
+        compras_cliente = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
+        dados_audit, faltantes_comerciais = [], []
+
+        for cod, nome in PRODUTOS_FOCAIS.items():
+            if cod in compras_cliente:
+                v_item = vendas_loja[vendas_loja['PRODUTO CODIGO'].astype(str) == cod]
+                u_data = v_item['DATA'].max().strftime('%d/%m/%Y')
+                p_s = buscar_preco_na_tabela(arquivo_preco, cod)
+                dados_audit.append({"CÓDIGO": cod, "PRODUTO": nome, "ÚLTIMA COMPRA": u_data, "SUGERIDO": f"R$ {p_s:.2f}", "FALTA NA LOJA?": False, "PREÇO GÔNDOLA": 0.0})
             else:
-                c_graf, c_rank = st.columns([3, 2])
-                with c_graf:
-                    df_soma_filial = df_w[df_w[col_status].str.contains('Aprovado|Pendente|Conforme|Sim', case=False, na=False)]
-                    if not df_soma_filial.empty:
-                        soma_filial = df_soma_filial.groupby(col_filial).size().reset_index(name='TOTAL')
-                        soma_filial[col_filial] = soma_filial[col_filial].str.replace('Minassal Ltda - ', '', regex=False)
-                        st.dataframe(soma_filial, use_container_width=True, hide_index=True)
-                    df_fil = df_w.groupby([col_filial, col_status]).size().reset_index(name='Qtd')
-                    df_fil = df_fil[df_fil[col_status].str.contains('Aprovado|Pendente|Sim|Conforme', case=False, na=False)]
-                    fig = px.bar(df_fil, x=col_filial, y='Qtd', color=col_status, barmode='group'); st.plotly_chart(fig, use_container_width=True)
-                with c_rank:
-                    df_rank = df_w.groupby([col_promotor, col_status]).size().unstack(fill_value=0)
-                    for promotor, row in df_rank.iterrows():
-                        qtd_ok = sum([val for col, val in row.items() if re.search('Aprovado|Conforme|Sim', str(col), re.IGNORECASE)])
-                        qtd_pend = sum([val for col, val in row.items() if re.search('Pendente', str(col), re.IGNORECASE)])
-                        if qtd_ok == 0 and qtd_pend == 0: continue
-                        foto_p = obter_foto_promotor(promotor); c_im, c_tx = st.columns([1, 4])
-                        with c_im: st.image(foto_p, width=50)
-                        with c_tx: st.markdown(f"<div class='row-whiskas'><b>{promotor}</b><div class='num-whiskas'>✅{int(qtd_ok)} ⚠️{int(qtd_pend)}</div></div>", unsafe_allow_html=True)
+                faltantes_comerciais.append([cod, nome])
 
-        elif pagina == "🎯 Metas por Item (Detelhado)":
-            st.markdown("## 🎯 Detalhamento de Metas por Item")
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["👜 Small Bags", "➕ Ponto Extra Sachê", "🐱 Sache Rebaixa (CV)", "🦴 Petisco Rebaixa (CV)", "📉 Rebaixa Whiskas (Reset)"])
-            def render_meta_item(item_nome, tab_context):
-                with tab_context:
-                    st.markdown(f"### {item_nome}")
-                    for filial in FILIAIS:
-                        metas_f = metas_dict.get(filial, {}); meta_val = int(metas_f.get(item_nome, 0))
-                        nome_f = filial.split('-')[-1].strip(); df_fil = df[df[col_filial].str.contains(nome_f, case=False, na=False)]
-                        df_item = df_fil[df_fil[col_item] == item_nome]
-                        apr = len(df_item[df_item[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)])
-                        pen = len(df_item[df_item[col_status].str.contains('Pendente', case=False, na=False)])
-                        st.markdown(f"<div class='filial-header'>{nome_f}</div><div class='filial-stats'><div class='stat-box'><div class='stat-label'>Meta</div><div class='stat-value' style='color:#3b82f6'>{meta_val}</div></div><div class='stat-box'><div class='stat-label'>Real+Pend</div><div class='stat-value' style='color:#16a34a'>{apr + pen}</div></div></div>", unsafe_allow_html=True)
-                        if not df_item.empty:
-                            df_prom = df_item.groupby(col_promotor).apply(lambda x: pd.Series({'Apr': len(x[x[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)]), 'Pend': len(x[x[col_status].str.contains('Pendente', case=False, na=False)])})).sort_values('Apr', ascending=False)
-                            for promotor, row in df_prom.iterrows():
-                                if row['Apr'] == 0 and row['Pend'] == 0: continue
-                                foto = obter_foto_promotor(promotor); c_img, c_info = st.columns([1, 4])
-                                with c_img: st.image(foto, width=40)
-                                with c_info: st.markdown(f"<div class='promo-row'><div style='flex:1; font-weight:bold; font-size:14px;'>{promotor}</div><div style='margin-right:10px;'><span class='pill-ok'>{int(row['Apr'])}</span> <span class='pill-pend'>{int(row['Pend'])}</span></div></div>", unsafe_allow_html=True)
-                        else: st.info("Sem dados.")
-                        st.markdown("---")
-            render_meta_item("Small Bags", tab1); render_meta_item("Ponto Extra de Sachês/Petiscos", tab2)
-            render_meta_item("Combos Virtuais Sachês (KiteKat, Champ, Optimum)", tab3); render_meta_item("Combos Virtuais Petiscos", tab4)
-            render_meta_item("Reset Whiskas Sachês", tab5)
-
-        elif pagina == "🏆 Ranking Consolidado (Geral)":
-            st.markdown("## 🏆 Ranking Consolidado de Promotores")
-            df_consolidado = df[df[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)].copy()
-            if not df_consolidado.empty:
-                ranking_geral = df_consolidado.groupby([col_promotor, col_filial, col_item]).size().unstack(fill_value=0).reset_index()
-                for it in TODOS_ITENS:
-                    if it not in ranking_geral.columns: ranking_geral[it] = 0
-                ranking_geral['TOTAL'] = ranking_geral[TODOS_ITENS].sum(axis=1)
-                ranking_geral = ranking_geral.sort_values('TOTAL', ascending=False).reset_index(drop=True)
-                ranking_geral[col_filial] = ranking_geral[col_filial].str.replace('Minassal Ltda - ', '', regex=False)
-                cols_display = [col_promotor, col_filial] + TODOS_ITENS + ['TOTAL']; ranking_geral = ranking_geral[cols_display]
-                ranking_geral.columns = ['Promotor', 'Filial'] + TODOS_ITENS + ['TOTAL GERAL']; st.dataframe(ranking_geral, use_container_width=True, hide_index=True)
-            else: st.warning("Nenhum dado aprovado encontrado.")
-
-        elif pagina == "📊 Aprovado e Pendente vs Meta":
-            st.markdown("## 📊 APROVADO E PENDENTE VERSUS META"); dados_quadro = []
-            for filial in FILIAIS:
-                nome_curto = filial.split('-')[-1].strip(); df_filial = df[df[col_filial].str.contains(nome_curto, case=False, na=False)]
-                metas_f = metas_dict.get(filial, {}); for it in TODOS_ITENS:
-                    meta_item = int(metas_f.get(it, 0)); df_item = df_filial[df_filial[col_item] == it]
-                    aprovados = len(df_item[df_item[col_status].str.contains('Aprovado|Conforme|Sim', case=False, na=False)])
-                    pendentes = len(df_item[df_item[col_status].str.contains('Pendente', case=False, na=False)])
-                    dados_quadro.append({"Filial": nome_curto, "Item": it, "Meta": meta_item, "Aprovados": aprovados, "Pendentes": pendentes, "Apr + Pend": aprovados+pendentes, "Falta": max(0, meta_item-aprovados)})
-            df_quadro = pd.DataFrame(dados_quadro); item_filtro = st.selectbox("🎯 Filtrar:", ["Todos"] + TODOS_ITENS)
-            df_exibicao = df_quadro if item_filtro == "Todos" else df_quadro[df_quadro["Item"] == item_filtro]
-            st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
-
-        elif pagina == "📍 Leituras Clientes TOP REDES":
-            st.markdown("## 📍 Leituras Clientes TOP REDES")
-            cnpj_col = next((c for c in df.columns if 'Cnpj' in c or 'Documento' in c or 'Cpf' in c or 'Cnpjcpfpdv' in c), None)
-            if cnpj_col:
-                df['Cnpj_Clean'] = df[cnpj_col].apply(limpar_cnpj)
-                for f_nome in ["Juiz de Fora", "Pocos de Caldas", "Sao Joao da Boa Vista", "Sao Jose do Rio Preto"]:
-                    st.markdown(f"<div class='filial-header'>🏢 FILIAL: {f_nome.upper()}</div><br>", unsafe_allow_html=True)
-                    clientes_f = [c for c in TOP_40_REDES_DATA if c[1] == f_nome]; dados_tabela = []
-                    tot_sb_apr, tot_sb_pen, tot_wh_apr, tot_wh_pen = 0, 0, 0, 0
-                    for cnpj, _, razao in clientes_f:
-                        df_c = df[(df['Cnpj_Clean'] == cnpj)]
-                        sb_apr = len(df_c[(df_c[col_item] == "Small Bags") & (df_c[col_status].str.contains('Aprovado|Sim|Conforme', case=False, na=False))])
-                        sb_pen = len(df_c[(df_c[col_item] == "Small Bags") & (df_c[col_status].str.contains('Pendente', case=False, na=False))])
-                        wh_apr = len(df_c[(df_c[col_item] == "Reset Whiskas Sachês") & (df_c[col_status].str.contains('Aprovado|Sim|Conforme', case=False, na=False))])
-                        wh_pen = len(df_c[(df_c[col_item] == "Reset Whiskas Sachês") & (df_c[col_status].str.contains('Pendente', case=False, na=False))])
-                        tot_sb_apr += sb_apr; tot_sb_pen += sb_pen; tot_wh_apr += wh_apr; tot_wh_pen += wh_pen
-                        dados_tabela.append({"Razão Social": razao, "CNPJ": cnpj, "Small Bags Aprovados": sb_apr, "Small Bags Pendentes": sb_pen, "Whiskas Rebaixa Aprovados": wh_apr, "Whiskas Rebaixa Pendentes": wh_pen, "Total": (sb_apr + sb_pen + wh_apr + wh_pen)})
-                    st.dataframe(pd.DataFrame(dados_tabela), use_container_width=True, hide_index=True)
-                    c1, c2 = st.columns(2); c1.markdown(f"**Total SB ({f_nome}):** ✅ {tot_sb_apr} | ⚠️ {tot_sb_pen}"); c2.markdown(f"**Total WH ({f_nome}):** ✅ {tot_wh_apr} | ⚠️ {tot_wh_pen}"); st.markdown("---")
-            else: st.error("Coluna de documento não encontrada.")
-else: st.info("👆 Carregue o CSV ao lado para iniciar.")
+        if dados_audit:
+            st.write(f"### Auditoria de Portfólio - {loja}")
+            df_edit = st.data_editor(pd.DataFrame(dados_audit), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "ÚLTIMA COMPRA", "SUGERIDO"])
+            feedback = st.text_area("🗣️ Opinião/Ponto de Melhoria:")
+            if st.button("🚀 FINALIZAR E ENVIAR RELATÓRIO", use_container_width=True):
+                with st.spinner("Enviando..."):
+                    pdf = gerar_pdf_mars(promotor, loja, df_edit, faltantes_comerciais, feedback)
+                    enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf)
+                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), len(dados_audit), len(faltantes_comerciais), "PADRAO")
+                    st.success("Enviado com sucesso!"); st.balloons()
+        else:
+            st.error("🚨 CRÍTICO: Este cliente não possui NENHUMA compra de itens focais em 2026.")
+            feedback_total = st.text_area("🗣️ Justificativa da Falta de Mix Total:")
+            if st.button("🚨 ENVIAR CRÍTICA DE MIX COMPLETO", use_container_width=True):
+                with st.spinner("Gerando crítica..."):
+                    pdf = gerar_pdf_mars(promotor, loja, pd.DataFrame(), faltantes_comerciais, feedback_total)
+                    enviar_email(f"🚨 CRÍTICA MIX TOTAL: {loja}", pdf)
+                    salvar_na_torre_de_controle(promotor, loja, len(PRODUTOS_FOCAIS), 0, len(PRODUTOS_FOCAIS), "CRÍTICA TOTAL")
+                    st.success("Crítica de Mix Total enviada!"); st.balloons()
