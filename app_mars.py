@@ -120,7 +120,6 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                     sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
                 else:
                     sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
-            
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec_val:.2f}", f"R$ {p_lo_val:.2f}", sit, fal_st])
             
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
@@ -188,3 +187,13 @@ else:
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
                 if enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf):
                     st.success("Relatório enviado!"); st.balloons()
+        else:
+            st.warning("⚠️ Esta loja não possui nenhum item do Mix Focal comprado recentemente.")
+            feedback_vazio = st.text_area("🗣️ Justificativa de Mix Zero nesta Loja:")
+            if st.button("🚨 ENVIAR RELATÓRIO DE MIX ZERO"):
+                if feedback_vazio:
+                    pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_vazio)
+                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
+                        st.success("Relatório enviado!"); st.balloons()
+                else:
+                    st.error("Por favor, preencha a justificativa.")
