@@ -1,4 +1,4 @@
-import streamlit st
+import streamlit as st
 import pandas as pd
 import os
 import unicodedata
@@ -89,7 +89,7 @@ def carregar_vendas():
     df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
     return df
 
-# --- FUNÇÃO PDF (PRESERVADA) ---
+# --- FUNÇÃO PDF ---
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
@@ -120,6 +120,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                     sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
                 else:
                     sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+            
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec_val:.2f}", f"R$ {p_lo_val:.2f}", sit, fal_st])
             
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
@@ -187,13 +188,3 @@ else:
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
                 if enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf):
                     st.success("Relatório enviado!"); st.balloons()
-        else:
-            st.warning("⚠️ Esta loja não possui nenhum item do Mix Focal comprado recentemente.")
-            feedback_mix_zero = st.text_area("🗣️ Justificativa/Observações (Mix Zero nesta Loja):")
-            if st.button("🚨 ENVIAR RELATÓRIO DE MIX ZERO"):
-                if feedback_mix_zero:
-                    pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_mix_zero)
-                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
-                        st.success("Relatório de Mix Zero enviado com sucesso!"); st.balloons()
-                else:
-                    st.error("Por favor, preencha a justificativa antes de enviar.")
