@@ -189,10 +189,10 @@ else:
                     st.success("Relatório enviado!"); st.balloons()
         else:
             st.warning("⚠️ Esta loja não possui nenhum item do Mix Focal comprado recentemente.")
-            feedback_vazio = st.text_area("🗣️ Justificativa de Mix Zero nesta Loja:")
+            feedback_zero = st.text_area("🗣️ Justificativa de Mix Zero (Campo Obrigatório):")
             if st.button("🚨 ENVIAR RELATÓRIO DE MIX ZERO"):
-                if feedback_vazio:
-                    pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_vazio)
+                if feedback_zero:
+                    pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_zero)
                     if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
                         st.success("Relatório enviado!"); st.balloons()
                 else:
