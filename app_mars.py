@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st
 import pandas as pd
 import os
 import unicodedata
@@ -89,7 +89,7 @@ def carregar_vendas():
     df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
     return df
 
-# --- FUNÇÃO PDF AJUSTADA ---
+# --- FUNÇÃO PDF (PRESERVADA) ---
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_Mars_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
@@ -105,40 +105,32 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS E GÔNDOLA</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
         row_colors = []
-        
         for i, row in enumerate(df_audit.to_dict('records')):
             idx = i + 1
             p_rec_val = converter_preco(row.get('SUGERIDO', 0.0))
-            p_loja_val = float(row.get('PREÇO GÔNDOLA', 0.0))
-            falta_status = "SIM" if row.get('FALTA NA LOJA?', False) else "NÃO"
-            
-            if p_loja_val == 0:
-                sit = "FALTA"
-                row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+            p_lo_val = float(row.get('PREÇO GÔNDOLA', 0.0))
+            fal_st = "SIM" if row.get('FALTA NA LOJA?', False) else "NÃO"
+            if p_lo_val == 0:
+                sit = "FALTA"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
             else:
-                dif = ((p_loja_val - p_rec_val) / p_rec_val) * 100
-                if p_loja_val > (p_rec_val + 0.01):
-                    sit = f"ACIMA (+{dif:.1f}%)"
-                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
-                elif p_loja_val < (p_rec_val - 0.01):
-                    # Novo ajuste: Mostra a porcentagem negativa se estiver mais barato
-                    sit = f"CORRETO ({dif:.1f}%)"
-                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+                dif = ((p_lo_val - p_rec_val) / p_rec_val) * 100
+                if p_lo_val > (p_rec_val + 0.01):
+                    sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                elif p_lo_val < (p_rec_val - 0.01):
+                    sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
                 else:
-                    sit = "CORRETO"
-                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
-            
-            data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec_val:.2f}", f"R$ {p_loja_val:.2f}", sit, falta_status])
+                    sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+            data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec_val:.2f}", f"R$ {p_lo_val:.2f}", sit, fal_st])
             
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
-        estilo_t1 = [('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('ALIGN', (1,0), (-1,-1), 'CENTER'), ('FONTSIZE', (0,0), (-1,-1), 9)]
-        estilo_t1.extend(row_colors); t1.setStyle(TableStyle(estilo_t1)); elementos.append(t1); elementos.append(Spacer(1, 15))
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
+        elementos.append(t1); elementos.append(Spacer(1, 15))
         
     elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
     data_f = [["Código", "Produto"]]
     for f in df_faltantes: data_f.append([f[0], f[1]])
     t2 = Table(data_f, colWidths=[80, 435])
-    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('FONTSIZE', (0,0), (-1,-1), 9)]))
+    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
     elementos.append(t2)
     
     if feedback:
@@ -195,3 +187,13 @@ else:
                 pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_edit, faltantes, feedback)
                 if enviar_email(f"🐾 OPORTUNIDADE MARS: {loja}", pdf):
                     st.success("Relatório enviado!"); st.balloons()
+        else:
+            st.warning("⚠️ Esta loja não possui nenhum item do Mix Focal comprado recentemente.")
+            feedback_mix_zero = st.text_area("🗣️ Justificativa/Observações (Mix Zero nesta Loja):")
+            if st.button("🚨 ENVIAR RELATÓRIO DE MIX ZERO"):
+                if feedback_mix_zero:
+                    pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), faltantes, feedback_mix_zero)
+                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
+                        st.success("Relatório de Mix Zero enviado com sucesso!"); st.balloons()
+                else:
+                    st.error("Por favor, preencha a justificativa antes de enviar.")
