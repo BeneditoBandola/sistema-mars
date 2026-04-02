@@ -66,16 +66,11 @@ def salvar_nas_planilhas(resumo, detalhado):
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         spreadsheet = client.open("Torre_de_Controle_Mars")
-        
-        # Aba 1: Resumo
         spreadsheet.sheet1.append_row(resumo)
-        
-        # Aba 2: Oportunidades Detalhadas (Busca por nome ou posição)
         try:
             aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
         except:
             aba_detalhe = spreadsheet.get_worksheet(1)
-            
         aba_detalhe.append_rows(detalhado)
         return True
     except Exception as e:
@@ -113,19 +108,39 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
+    dt_pdf = obter_horario_brasil()
+    
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilos['Title']))
     elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
+    elementos.append(Paragraph(f"<b>DATA/HORA:</b> {dt_pdf}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
+    
     if not df_audit.empty:
+        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
-        for row in df_audit.to_dict('records'):
+        row_colors = []
+        for i, row in enumerate(df_audit.to_dict('records')):
+            idx = i + 1
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            sit = "FALTA" if p_loja == 0 or row.get('FALTA NA LOJA?') else "CORRETO"
+            
+            if p_loja == 0 or row.get('FALTA NA LOJA?'):
+                sit = "FALTA"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+            else:
+                dif = ((p_loja - p_rec) / p_rec) * 100
+                if p_loja > (p_rec + 0.01):
+                    sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                elif p_loja < (p_rec - 0.01):
+                    sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+                else:
+                    sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+            
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
+            
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
         elementos.append(t1)
+        
     elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
     data_f = [["Código", "Produto"]]
     for f in df_faltantes: data_f.append([f[0], f[1]])
@@ -161,61 +176,50 @@ else:
 
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        unid = str(v_loja.iloc[0, 0]).upper()
+        unid_cod = str(v_loja.iloc[0, 0]).upper()
         cidade_l = v_loja.iloc[0]['CIDADE']
         
-        if unid.startswith("1"): f_nome = "POÇOS DE CALDAS"
-        elif unid.startswith("4"): f_nome = "SÃO JOÃO DA BOA VISTA"
-        elif unid.startswith("2"): f_nome = "JUIZ DE FORA"
-        else: f_nome = "FILIAL DESCONHECIDA"
+        if unid_cod.startswith("1"): f_label = "POÇOS DE CALDAS"
+        elif unid_cod.startswith("4"): f_label = "SÃO JOÃO DA BOA VISTA"
+        elif unid_cod.startswith("2"): f_label = "JUIZ DE FORA"
+        else: f_label = "FILIAL NÃO MAPEADA"
         
-        st.sidebar.info(f"🏢 Filial: {f_nome}")
-        arq_p = "MINEIROS PREÇOS MARS COMPLETO.csv" if unid.startswith(("1", "4")) else "PAULISTINHAS MARS PREÇO.csv"
-        st.sidebar.caption(f"Tabela: {arq_p}")
+        st.sidebar.info(f"🏢 Filial: {f_label}")
+        arq_precos = "MINEIROS PREÇOS MARS COMPLETO.csv" if unid_cod.startswith(("1", "4")) else "PAULISTINHAS MARS PREÇO.csv"
+        st.sidebar.caption(f"Tabela: {arq_precos}")
 
-        comp = set(v_loja['PRODUTO CODIGO'].astype(str).unique())
+        comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).unique())
         dados_audit_view, prod_faltantes = [], []
         
-        for cod, nome in PRODUTOS_FOCAIS.items():
-            if cod in comp:
+        for c, n in PRODUTOS_FOCAIS.items():
+            if c in comp_cli:
                 dados_audit_view.append({
-                    "FALTA NA LOJA?": False,
-                    "CÓDIGO": cod,
-                    "PRODUTO": nome,
-                    "PREÇO GÔNDOLA": 0.0,
-                    "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_p, cod):.2f}"
+                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": n, "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
-            else:
-                prod_faltantes.append([cod, nome])
+            else: prod_faltantes.append([c, n])
         
         if dados_audit_view:
-            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, 
-                                     disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
-            obs = st.text_area("🗣️ Observações:")
-            
+            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
+            obs_text = st.text_area("🗣️ Observações:")
             if st.button("🚀 ENVIAR RELATÓRIO"):
-                horario = obter_horario_brasil()
+                horario_ref = obter_horario_brasil()
                 detalhado_rows = []
-                
-                # Prepara a 2ª aba exatamente como na imagem (Data/Hora, Promotor, Loja, Cidade, Código Produto, Nome Produto, Status)
                 for r in df_edit.to_dict('records'):
-                    status_planilha = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                    detalhado_rows.append([horario, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_planilha])
-                
+                    status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val])
                 for f in prod_faltantes:
-                    detalhado_rows.append([horario, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA"])
-                
-                pdf = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs)
-                if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf):
-                    salvar_nas_planilhas([horario, promotor, loja, cidade_l, obs], detalhado_rows)
-                    st.success("Enviado e salvo com sucesso!"); st.balloons()
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA"])
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs_text)
+                if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, obs_text], detalhado_rows)
+                    st.success("Enviado com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
-            obs_z = st.text_area("🗣️ Justificativa Mix Zero:")
+            obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
-                horario = obter_horario_brasil()
-                detalhado_rows = [[horario, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO"] for f in prod_faltantes]
-                pdf = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), prod_faltantes, obs_z)
-                if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
-                    salvar_nas_planilhas([horario, promotor, loja, cidade_l, "MIX ZERO: "+obs_z], detalhado_rows)
-                    st.success("Mix Zero registrado!"); st.balloons()
+                horario_ref = obter_horario_brasil()
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO"] for f in prod_faltantes]
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), prod_faltantes, obs_z_mix)
+                if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
+                    st.success("Mix Zero registrado com sucesso!"); st.balloons()
