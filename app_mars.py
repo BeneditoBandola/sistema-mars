@@ -3,15 +3,11 @@ import pandas as pd
 import os
 import unicodedata
 import smtplib
-import csv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-
-# Bibliotecas para a criação do PDF
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -62,21 +58,19 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- FUNÇÃO DE SALVAMENTO NA PLANILHA (RESTAURADA E NOMEADA) ---
+# --- CONEXÃO GOOGLE SHEETS VIA SECRETS ---
 def salvar_na_planilha(dados_lista):
     try:
+        creds_dict = st.secrets["gcp_service_account"]
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        # Nome da planilha que você solicitou
         sheet = client.open("Torre_de_Controle_Mars").sheet1 
         sheet.append_row(dados_lista)
         return True
     except Exception as e:
         st.error(f"Erro na Planilha: {e}")
-        return False
-
-# --- LISTA MESTRA FOCAL ---
+        return False# --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -112,23 +106,17 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     elementos.append(Spacer(1, 15))
     if not df_audit.empty:
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
-        row_colors = []
         for i, row in enumerate(df_audit.to_dict('records')):
-            idx = i + 1
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            if p_loja == 0: sit = "FALTA"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
-            else:
-                dif = ((p_loja - p_rec) / p_rec) * 100
-                if p_loja > (p_rec + 0.01): sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
-                else: sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+            sit = "CORRETO" if p_loja > 0 else "FALTA"
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
         elementos.append(t1)
     elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
     data_f = [["Código", "Produto"]]
-    for f in df_faltantes: data_f.append([f[0], f[1]])
+    for f in faltantes: data_f.append([f[0], f[1]])
     t2 = Table(data_f, colWidths=[80, 435])
     t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
     elementos.append(t2)
@@ -183,5 +171,4 @@ else:
                     if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
                         salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, "MIX ZERO: " + obs_z])
                         st.success("Mix Zero Registrado!"); st.balloons()
-                else:
-                    st.error("Preencha a justificativa.")
+                else: st.error("Preencha a justificativa.")
