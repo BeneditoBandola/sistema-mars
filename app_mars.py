@@ -67,15 +67,15 @@ def salvar_nas_planilhas(resumo, detalhado):
         client = gspread.authorize(creds)
         spreadsheet = client.open("Torre_de_Controle_Mars")
         
-        # Aba 1: Resumo da Visita
+        # Aba 1: Resumo (Aba Principal)
         spreadsheet.sheet1.append_row(resumo)
         
-        # Aba 2: Oportunidades Detalhadas (Data, Promotor, Loja, Cidade, Cód, Prod, Status)
+        # Aba 2: Oportunidades Detalhadas
         aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
         aba_detalhe.append_rows(detalhado)
         return True
     except Exception as e:
-        st.error(f"Erro ao atualizar planilhas: {e}")
+        st.error(f"Erro na Planilha: {e}")
         return False
 
 # --- LISTA MESTRA FOCAL ---
@@ -114,10 +114,10 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     elementos.append(Spacer(1, 15))
     if not df_audit.empty:
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
-        for i, row in enumerate(df_audit.to_dict('records')):
+        for row in df_audit.to_dict('records'):
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            sit = "CORRETO" if p_loja > 0 else "FALTA"
+            sit = "FALTA" if p_loja == 0 or row.get('FALTA NA LOJA?') else "CORRETO"
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
         t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
@@ -160,7 +160,6 @@ else:
         unid = str(v_loja.iloc[0, 0]).upper()
         cidade_l = v_loja.iloc[0]['CIDADE']
         
-        # Identificação da Filial na Sidebar
         if unid.startswith("1"): f_nome = "POÇOS DE CALDAS"
         elif unid.startswith("4"): f_nome = "SÃO JOÃO DA BOA VISTA"
         elif unid.startswith("2"): f_nome = "JUIZ DE FORA"
@@ -171,33 +170,48 @@ else:
         st.sidebar.caption(f"Tabela: {arq_p}")
 
         comp = set(v_loja['PRODUTO CODIGO'].astype(str).unique())
-        dados_a, falt, detalhado_rows = [], [], []
-        horario = obter_horario_brasil()
-
-        for c, n in PRODUTOS_FOCAIS.items():
-            if c in comp:
-                dados_a.append({"PRODUTO": n, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_p, c):.2f}", "PREÇO GÔNDOLA": 0.0, "FALTA NA LOJA?": False})
-                status = "Auditado"
-            else:
-                falt.append([c, n])
-                status = "Oportunidade"
-            detalhado_rows.append([horario, promotor, loja, cidade_l, c, n, status])
+        dados_audit_view, prod_faltantes = [], []
         
-        if dados_a:
-            df_e = st.data_editor(pd.DataFrame(dados_a), use_container_width=True, hide_index=True)
+        for cod, nome in PRODUTOS_FOCAIS.items():
+            if cod in comp:
+                dados_audit_view.append({
+                    "FALTA NA LOJA?": False,
+                    "CÓDIGO": cod,
+                    "PRODUTO": nome,
+                    "PREÇO GÔNDOLA": 0.0,
+                    "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_p, cod):.2f}"
+                })
+            else:
+                prod_faltantes.append([cod, nome])
+        
+        if dados_audit_view:
+            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, 
+                                     disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
             obs = st.text_area("🗣️ Observações:")
+            
             if st.button("🚀 ENVIAR RELATÓRIO"):
-                pdf = gerar_pdf_mars(promotor, loja, cidade_l, df_e, falt, obs)
+                horario = obter_horario_brasil()
+                detalhado_rows = []
+                
+                # Registra TODOS os produtos (TEM, FALTA ou NÃO COMERCIALIZA)
+                for r in df_edit.to_dict('records'):
+                    status_planilha = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
+                    detalhado_rows.append([horario, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_planilha])
+                
+                for f in prod_faltantes:
+                    detalhado_rows.append([horario, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA"])
+                
+                pdf = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf):
                     salvar_nas_planilhas([horario, promotor, loja, cidade_l, obs], detalhado_rows)
-                    st.success("Tudo enviado e salvo em ambas as abas!"); st.balloons()
+                    st.success("Enviado com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
-            obs_z = st.text_area("🗣️ Justificativa:")
+            obs_z = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
-                if obs_z:
-                    pdf = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), falt, obs_z)
-                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
-                        salvar_nas_planilhas([horario, promotor, loja, cidade_l, "MIX ZERO: "+obs_z], detalhado_rows)
-                        st.success("Mix Zero registrado!"); st.balloons()
-                else: st.error("Justifique o Mix Zero.")
+                horario = obter_horario_brasil()
+                detalhado_rows = [[horario, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO"] for f in prod_faltantes]
+                pdf = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), prod_faltantes, obs_z)
+                if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
+                    salvar_nas_planilhas([horario, promotor, loja, cidade_l, "MIX ZERO: "+obs_z], detalhado_rows)
+                    st.success("Mix Zero registrado!"); st.balloons()
