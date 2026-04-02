@@ -58,7 +58,6 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- CONEXÃO GOOGLE SHEETS VIA SECRETS ---
 def salvar_na_planilha(dados_lista):
     try:
         creds_dict = st.secrets["gcp_service_account"]
@@ -70,7 +69,9 @@ def salvar_na_planilha(dados_lista):
         return True
     except Exception as e:
         st.error(f"Erro na Planilha: {e}")
-        return False# --- LISTA MESTRA FOCAL ---
+        return False
+
+# --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -106,17 +107,23 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     elementos.append(Spacer(1, 15))
     if not df_audit.empty:
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
+        row_colors = []
         for i, row in enumerate(df_audit.to_dict('records')):
+            idx = i + 1
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            sit = "CORRETO" if p_loja > 0 else "FALTA"
+            if p_loja == 0: sit = "FALTA"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+            else:
+                dif = ((p_loja - p_rec) / p_rec) * 100
+                if p_loja > (p_rec + 0.01): sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                else: sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
         elementos.append(t1)
     elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
     data_f = [["Código", "Produto"]]
-    for f in faltantes: data_f.append([f[0], f[1]])
+    for f in df_faltantes: data_f.append([f[0], f[1]])
     t2 = Table(data_f, colWidths=[80, 435])
     t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
     elementos.append(t2)
@@ -142,33 +149,50 @@ if 'user_mars' not in st.session_state:
 else:
     promotor = st.session_state.user_mars
     df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
-    df_f = df_vendas[df_vendas['CIDADE_BUSCA'].isin([limpar_texto(c) for c in ROTAS_MARS[promotor]])]
+    cidades_auth = [limpar_texto(c) for c in ROTAS_MARS[promotor]]
+    df_f = df_vendas[df_vendas['CIDADE_BUSCA'].isin(cidades_auth)]
+    
+    # --- MENU LATERAL (RESTAURADO) ---
+    st.sidebar.markdown(f"### 👤 Promotor: {promotor}")
     loja = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].unique()))
+
     if loja != "-- Selecione --":
-        v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        cidade_l = v_loja.iloc[0]['CIDADE']
-        arq_p = "MINEIROS PREÇOS MARS COMPLETO.csv" if str(v_loja.iloc[0, 0]).startswith(("1", "4")) else "PAULISTINHAS MARS PREÇO.csv"
-        comp = set(v_loja['PRODUTO CODIGO'].astype(str).unique())
+        vendas_loja = df_f[df_f['CLIENTE NOME'] == loja]
+        unidade_id = str(vendas_loja.iloc[0, 0]).upper()
+        cidade_loja = vendas_loja.iloc[0]['CIDADE']
+        
+        # Define arquivo e filial
+        if unidade_id.startswith(("1", "4")):
+            arquivo_p = "MINEIROS PREÇOS MARS COMPLETO.csv"
+            filial = "MINEIROS (UNID 1/4)"
+        else:
+            arquivo_p = "PAULISTINHAS MARS PREÇO.csv"
+            filial = "PAULISTINHAS"
+            
+        st.sidebar.info(f"📍 Filial: {filial}\n\n📄 Tabela: {arquivo_p}")
+        if st.sidebar.button("Trocar Promotor"): del st.session_state.user_mars; st.rerun()
+
+        comp_cli = set(vendas_loja['PRODUTO CODIGO'].astype(str).unique())
         dados_a, falt = [], []
         for c, n in PRODUTOS_FOCAIS.items():
-            if c in comp: dados_a.append({"PRODUTO": n, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_p, c):.2f}", "PREÇO GÔNDOLA": 0.0, "FALTA NA LOJA?": False})
+            if c in comp_cli: dados_a.append({"PRODUTO": n, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arquivo_p, c):.2f}", "PREÇO GÔNDOLA": 0.0, "FALTA NA LOJA?": False})
             else: falt.append([c, n])
         
         if dados_a:
             df_e = st.data_editor(pd.DataFrame(dados_a), use_container_width=True, hide_index=True)
             obs = st.text_area("🗣️ Observações:")
             if st.button("🚀 ENVIAR RELATÓRIO"):
-                pdf = gerar_pdf_mars(promotor, loja, cidade_l, df_e, falt, obs)
+                pdf = gerar_pdf_mars(promotor, loja, cidade_loja, df_e, falt, obs)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf):
-                    salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, obs])
-                    st.success("Enviado e Registrado!"); st.balloons()
+                    salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_loja, obs])
+                    st.success("Enviado e Gravado!"); st.balloons()
         else:
             st.warning("⚠️ Mix Zero detectado.")
             obs_z = st.text_area("🗣️ Justificativa de Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 if obs_z:
-                    pdf = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), falt, obs_z)
+                    pdf = gerar_pdf_mars(promotor, loja, cidade_loja, pd.DataFrame(), falt, obs_z)
                     if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
-                        salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, "MIX ZERO: " + obs_z])
+                        salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_loja, "MIX ZERO: " + obs_z])
                         st.success("Mix Zero Registrado!"); st.balloons()
                 else: st.error("Preencha a justificativa.")
