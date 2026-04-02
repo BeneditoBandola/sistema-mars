@@ -62,18 +62,21 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- CONEXÃO GOOGLE SHEETS (RESTAURADA) ---
+# --- FUNÇÃO DE SALVAMENTO NA PLANILHA (RESTAURADA E NOMEADA) ---
 def salvar_na_planilha(dados_lista):
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", scope)
         client = gspread.authorize(creds)
-        # Substitua pelo nome exato da sua planilha
-        sheet = client.open("NOME_DA_SUA_PLANILHA").sheet1 
+        # Nome da planilha que você solicitou
+        sheet = client.open("Torre_de_Controle_Mars").sheet1 
         sheet.append_row(dados_lista)
         return True
-    except:
-        return False# --- LISTA MESTRA FOCAL ---
+    except Exception as e:
+        st.error(f"Erro na Planilha: {e}")
+        return False
+
+# --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
     "99798": "BISCROK AD RP BANANA 500G", "99799": "BISCROK AD RP MACA 500G",
@@ -142,6 +145,7 @@ def enviar_email(assunto, pdf):
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen); s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
     except: return False
 
+# --- INTERFACE ---
 df_vendas = carregar_vendas()
 if 'user_mars' not in st.session_state:
     cols = st.columns(3)
@@ -161,18 +165,23 @@ else:
         for c, n in PRODUTOS_FOCAIS.items():
             if c in comp: dados_a.append({"PRODUTO": n, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_p, c):.2f}", "PREÇO GÔNDOLA": 0.0, "FALTA NA LOJA?": False})
             else: falt.append([c, n])
+        
         if dados_a:
             df_e = st.data_editor(pd.DataFrame(dados_a), use_container_width=True, hide_index=True)
             obs = st.text_area("🗣️ Observações:")
-            if st.button("🚀 ENVIAR"):
+            if st.button("🚀 ENVIAR RELATÓRIO"):
                 pdf = gerar_pdf_mars(promotor, loja, cidade_l, df_e, falt, obs)
-                enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf)
-                salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, obs])
-                st.success("Enviado!"); st.balloons()
+                if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf):
+                    salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, obs])
+                    st.success("Enviado e Registrado!"); st.balloons()
         else:
-            obs_z = st.text_area("🗣️ Justificativa Mix Zero:")
+            st.warning("⚠️ Mix Zero detectado.")
+            obs_z = st.text_area("🗣️ Justificativa de Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
-                pdf = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), falt, obs_z)
-                enviar_email(f"🚨 MIX ZERO: {loja}", pdf)
-                salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, "MIX ZERO: " + obs_z])
-                st.success("Registrado!"); st.balloons()
+                if obs_z:
+                    pdf = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), falt, obs_z)
+                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf):
+                        salvar_na_planilha([obter_horario_brasil(), promotor, loja, cidade_l, "MIX ZERO: " + obs_z])
+                        st.success("Mix Zero Registrado!"); st.balloons()
+                else:
+                    st.error("Preencha a justificativa.")
