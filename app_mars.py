@@ -67,11 +67,15 @@ def salvar_nas_planilhas(resumo, detalhado):
         client = gspread.authorize(creds)
         spreadsheet = client.open("Torre_de_Controle_Mars")
         
-        # Aba 1: Resumo (Aba Principal)
+        # Aba 1: Resumo
         spreadsheet.sheet1.append_row(resumo)
         
-        # Aba 2: Oportunidades Detalhadas
-        aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
+        # Aba 2: Oportunidades Detalhadas (Busca por nome ou posição)
+        try:
+            aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
+        except:
+            aba_detalhe = spreadsheet.get_worksheet(1)
+            
         aba_detalhe.append_rows(detalhado)
         return True
     except Exception as e:
@@ -163,7 +167,7 @@ else:
         if unid.startswith("1"): f_nome = "POÇOS DE CALDAS"
         elif unid.startswith("4"): f_nome = "SÃO JOÃO DA BOA VISTA"
         elif unid.startswith("2"): f_nome = "JUIZ DE FORA"
-        else: f_nome = "OUTRA FILIAL"
+        else: f_nome = "FILIAL DESCONHECIDA"
         
         st.sidebar.info(f"🏢 Filial: {f_nome}")
         arq_p = "MINEIROS PREÇOS MARS COMPLETO.csv" if unid.startswith(("1", "4")) else "PAULISTINHAS MARS PREÇO.csv"
@@ -193,7 +197,7 @@ else:
                 horario = obter_horario_brasil()
                 detalhado_rows = []
                 
-                # Registra TODOS os produtos (TEM, FALTA ou NÃO COMERCIALIZA)
+                # Prepara a 2ª aba exatamente como na imagem (Data/Hora, Promotor, Loja, Cidade, Código Produto, Nome Produto, Status)
                 for r in df_edit.to_dict('records'):
                     status_planilha = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
                     detalhado_rows.append([horario, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_planilha])
@@ -204,7 +208,7 @@ else:
                 pdf = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf):
                     salvar_nas_planilhas([horario, promotor, loja, cidade_l, obs], detalhado_rows)
-                    st.success("Enviado com sucesso!"); st.balloons()
+                    st.success("Enviado e salvo com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
             obs_z = st.text_area("🗣️ Justificativa Mix Zero:")
