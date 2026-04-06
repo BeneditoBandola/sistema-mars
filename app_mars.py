@@ -49,9 +49,18 @@ def converter_preco(valor):
     except: return 0.0
 
 def buscar_preco_na_tabela(arquivo, codigo_produto):
-    if not os.path.exists(arquivo): return 0.0
+    # Procura na pasta atual do script
+    diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
+    caminho_real = os.path.join(diretorio_atual, arquivo)
+    
+    if not os.path.exists(caminho_real):
+        # Tenta na raiz se não achar na pasta do script
+        caminho_real = arquivo if os.path.exists(arquivo) else None
+
+    if not caminho_real: return 0.0
+    
     try:
-        df_p = pd.read_csv(arquivo, sep=';', encoding='utf-8-sig', on_bad_lines='skip')
+        df_p = pd.read_csv(caminho_real, sep=';', encoding='utf-8-sig', on_bad_lines='skip')
         df_p.columns = [c.strip().upper() for c in df_p.columns]
         row = df_p[df_p['CÓDIGO'].astype(str).str.strip() == str(codigo_produto).strip()]
         if not row.empty: return converter_preco(row.iloc[0]['PREÇO RECOMENDADO'])
@@ -100,16 +109,33 @@ ROTAS_MARS = {
     "FERNANDA": ["JUIZ DE FORA"]
 }
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def carregar_vendas():
     try:
-        df = pd.read_csv("Vendas_Mars.csv", sep=None, engine='python', encoding='utf-8-sig')
+        # Detecta onde o script app_mars.py está rodando
+        diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
+        
+        # Procura qualquer arquivo que comece com 'Vendas' na pasta do script
+        arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
+        
+        if not arquivos:
+            # Tenta na raiz caso não esteja na pasta do script
+            arquivos = [f for f in os.listdir(".") if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
+            diretorio_atual = "."
+
+        if not arquivos:
+            st.error(f"Arquivo de vendas não encontrado! Verifique se ele está no GitHub.")
+            return pd.DataFrame()
+        
+        caminho_final = os.path.join(diretorio_atual, arquivos[0])
+        df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
         df.columns = [c.strip().upper() for c in df.columns]
+        
         if 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
         return df
     except Exception as e:
-        st.error(f"Erro ao ler arquivo Vendas_Mars.csv: {e}")
+        st.error(f"Erro ao carregar dados: {e}")
         return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
@@ -162,10 +188,9 @@ def enviar_email(assunto, pdf):
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen); s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
     except: return False
 
-# --- INTERFACE PRINCIPAL ---
+# --- INTERFACE ---
 st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</h1>", unsafe_allow_html=True)
 
-# 1. Desenha os botões de seleção de Promotor PRIMEIRO
 if 'user_mars' not in st.session_state:
     st.subheader("Selecione o seu nome:")
     cols = st.columns(3)
@@ -174,19 +199,18 @@ if 'user_mars' not in st.session_state:
             st.session_state.user_mars = nome
             st.rerun()
 else:
-    # 2. Se um promotor foi selecionado, carrega os dados e mostra a tela de trabalho
     df_vendas = carregar_vendas()
     
     if df_vendas.empty:
-        st.error("Erro crítico: Não foi possível carregar os dados de vendas.")
-        if st.button("Voltar ao Início"):
+        st.error("Aguardando carregamento de arquivos...")
+        if st.button("Voltar"):
             del st.session_state.user_mars
             st.rerun()
         st.stop()
 
     promotor = st.session_state.user_mars
     
-    # --- MAPEAMENTO DE FILIAL E TABELA POR PROMOTOR ---
+    # --- MAPEAMENTO DE FILIAL ---
     if promotor == "PAMELA":
         f_label, arq_precos = "POÇOS DE CALDAS", "MINEIROS PREÇOS MARS COMPLETO.csv"
     elif promotor in ["RODRIGO", "TIAGO"]:
@@ -206,7 +230,6 @@ else:
         del st.session_state.user_mars
         st.rerun()
 
-    # Filtro de Lojas
     df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
     df_f = df_vendas[df_vendas['CIDADE_BUSCA'].isin([limpar_texto(c) for c in ROTAS_MARS[promotor]])]
     
