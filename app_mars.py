@@ -58,7 +58,6 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- SALVAMENTO EM DUAS ABAS ---
 def salvar_nas_planilhas(resumo, detalhado):
     try:
         creds_dict = st.secrets["gcp_service_account"]
@@ -93,28 +92,35 @@ PRODUTOS_FOCAIS = {
 
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
-    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"], "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
-    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"], "MADALLA": ["TOCANTINS","PIRAUBA","GUARANI","RIO POMBA","VISCONDE DO RIO BRANCO", "UBA", "RIO POMBA"], "FERNANDA": ["JUIZ DE FORA"]
+    "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
+    "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"], 
+    "LUCIVANIA": ["MARILIA", "LINS", "TUPA"],
+    "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"], 
+    "MADALLA": ["TOCANTINS","PIRAUBA","GUARANI","RIO POMBA","VISCONDE DO RIO BRANCO", "UBA", "RIO POMBA"], 
+    "FERNANDA": ["JUIZ DE FORA"]
 }
 
 @st.cache_data
 def carregar_vendas():
-    df = pd.read_csv("Vendas_Mars.csv", sep=None, engine='python', encoding='utf-8-sig')
-    df.columns = [c.strip().upper() for c in df.columns]
-    df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
-    return df
+    try:
+        df = pd.read_csv("Vendas_Mars.csv", sep=None, engine='python', encoding='utf-8-sig')
+        df.columns = [c.strip().upper() for c in df.columns]
+        if 'DATA' in df.columns:
+            df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
+        return df
+    except Exception as e:
+        st.error(f"Erro ao ler arquivo Vendas_Mars.csv: {e}")
+        return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     nome_arquivo = f"Oportunidades_{loja.replace(' ', '_')}.pdf"
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
     dt_pdf = obter_horario_brasil()
-    
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilos['Title']))
     elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
     elementos.append(Paragraph(f"<b>DATA/HORA:</b> {dt_pdf}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
-    
     if not df_audit.empty:
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
@@ -123,7 +129,6 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             idx = i + 1
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            
             if p_loja == 0 or row.get('FALTA NA LOJA?'):
                 sit = "FALTA"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
             else:
@@ -134,13 +139,10 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                     sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
                 else:
                     sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
-            
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
-            
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
         t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
         elementos.append(t1)
-        
     elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
     data_f = [["Código", "Produto"]]
     for f in df_faltantes: data_f.append([f[0], f[1]])
@@ -160,41 +162,67 @@ def enviar_email(assunto, pdf):
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen); s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
     except: return False
 
-# --- INTERFACE ---
-df_vendas = carregar_vendas()
+# --- INTERFACE PRINCIPAL ---
+st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</h1>", unsafe_allow_html=True)
+
+# 1. Desenha os botões de seleção de Promotor PRIMEIRO
 if 'user_mars' not in st.session_state:
+    st.subheader("Selecione o seu nome:")
     cols = st.columns(3)
     for i, nome in enumerate(ROTAS_MARS.keys()):
-        if cols[i % 3].button(nome, use_container_width=True): st.session_state.user_mars = nome; st.rerun()
+        if cols[i % 3].button(nome, use_container_width=True): 
+            st.session_state.user_mars = nome
+            st.rerun()
 else:
+    # 2. Se um promotor foi selecionado, carrega os dados e mostra a tela de trabalho
+    df_vendas = carregar_vendas()
+    
+    if df_vendas.empty:
+        st.error("Erro crítico: Não foi possível carregar os dados de vendas.")
+        if st.button("Voltar ao Início"):
+            del st.session_state.user_mars
+            st.rerun()
+        st.stop()
+
     promotor = st.session_state.user_mars
+    
+    # --- MAPEAMENTO DE FILIAL E TABELA POR PROMOTOR ---
+    if promotor == "PAMELA":
+        f_label, arq_precos = "POÇOS DE CALDAS", "MINEIROS PREÇOS MARS COMPLETO.csv"
+    elif promotor in ["RODRIGO", "TIAGO"]:
+        f_label, arq_precos = "SÃO JOÃO DA BOA VISTA", "PAULISTINHAS MARS PREÇO.csv"
+    elif promotor in ["SARUETE", "LUCIVANIA"]:
+        f_label, arq_precos = "SÃO JOSÉ DO RIO PRETO", "PAULISTINHAS MARS PREÇO.csv"
+    elif promotor in ["FERNANDA", "MADALLA"]:
+        f_label, arq_precos = "JUIZ DE FORA", "MINEIROS PREÇOS MARS COMPLETO.csv"
+    else:
+        f_label, arq_precos = "FILIAL NÃO MAPEADA", "MINEIROS PREÇOS MARS COMPLETO.csv"
+
+    st.sidebar.markdown(f"### 👤 Promotor: {promotor}")
+    st.sidebar.info(f"🏢 Filial: {f_label}")
+    st.sidebar.caption(f"📊 Tabela: {arq_precos}")
+    
+    if st.sidebar.button("Trocar Promotor"):
+        del st.session_state.user_mars
+        st.rerun()
+
+    # Filtro de Lojas
     df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
     df_f = df_vendas[df_vendas['CIDADE_BUSCA'].isin([limpar_texto(c) for c in ROTAS_MARS[promotor]])]
     
-    st.sidebar.markdown(f"### 👤 Promotor: {promotor}")
     loja = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].unique()))
 
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        unid_cod = str(v_loja.iloc[0, 0]).upper()
         cidade_l = v_loja.iloc[0]['CIDADE']
-        
-        if unid_cod.startswith("1"): f_label = "POÇOS DE CALDAS"
-        elif unid_cod.startswith("4"): f_label = "SÃO JOÃO DA BOA VISTA"
-        elif unid_cod.startswith("2"): f_label = "JUIZ DE FORA"
-        else: f_label = "FILIAL NÃO MAPEADA"
-        
-        st.sidebar.info(f"🏢 Filial: {f_label}")
-        arq_precos = "MINEIROS PREÇOS MARS COMPLETO.csv" if unid_cod.startswith(("1", "4")) else "PAULISTINHAS MARS PREÇO.csv"
-        st.sidebar.caption(f"Tabela: {arq_precos}")
-
         comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).unique())
-        dados_audit_view, prod_faltantes = [], []
         
+        dados_audit_view, prod_faltantes = [], []
         for c, n in PRODUTOS_FOCAIS.items():
             if c in comp_cli:
                 dados_audit_view.append({
-                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": n, "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
+                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": n, 
+                    "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else: prod_faltantes.append([c, n])
         
