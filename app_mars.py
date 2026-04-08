@@ -49,12 +49,10 @@ def converter_preco(valor):
     except: return 0.0
 
 def buscar_preco_na_tabela(arquivo, codigo_produto):
-    # Procura na pasta atual do script
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     caminho_real = os.path.join(diretorio_atual, arquivo)
     
     if not os.path.exists(caminho_real):
-        # Tenta na raiz se não achar na pasta do script
         caminho_real = arquivo if os.path.exists(arquivo) else None
 
     if not caminho_real: return 0.0
@@ -112,25 +110,17 @@ ROTAS_MARS = {
 @st.cache_data(ttl=300)
 def carregar_vendas():
     try:
-        # Detecta onde o script app_mars.py está rodando
         diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
-        
-        # Procura qualquer arquivo que comece com 'Vendas' na pasta do script
         arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
-        
         if not arquivos:
-            # Tenta na raiz caso não esteja na pasta do script
             arquivos = [f for f in os.listdir(".") if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
             diretorio_atual = "."
-
         if not arquivos:
             st.error(f"Arquivo de vendas não encontrado! Verifique se ele está no GitHub.")
             return pd.DataFrame()
-        
         caminho_final = os.path.join(diretorio_atual, arquivos[0])
         df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
         df.columns = [c.strip().upper() for c in df.columns]
-        
         if 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
         return df
@@ -200,7 +190,6 @@ if 'user_mars' not in st.session_state:
             st.rerun()
 else:
     df_vendas = carregar_vendas()
-    
     if df_vendas.empty:
         st.error("Aguardando carregamento de arquivos...")
         if st.button("Voltar"):
@@ -210,7 +199,6 @@ else:
 
     promotor = st.session_state.user_mars
     
-    # --- MAPEAMENTO DE FILIAL ---
     if promotor == "PAMELA":
         f_label, arq_precos = "POÇOS DE CALDAS", "MINEIROS PREÇOS MARS COMPLETO.csv"
     elif promotor in ["RODRIGO", "TIAGO"]:
@@ -257,9 +245,12 @@ else:
                 detalhado_rows = []
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val])
+                    # MUDANÇA REALIZADA: ADICIONADO PREÇO GÔNDOLA E SUGERIDO NA EXPORTAÇÃO
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), r['SUGERIDO']])
                 for f in prod_faltantes:
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA"])
+                    # MUDANÇA REALIZADA: ADICIONADO ZEROS PARA MANTER PADRÃO DE COLUNAS
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA", 0.0, "R$ 0.00"])
+                
                 pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, obs_text], detalhado_rows)
@@ -269,7 +260,8 @@ else:
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
-                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO"] for f in prod_faltantes]
+                # MUDANÇA REALIZADA: ADICIONADO ZEROS PARA MANTER PADRÃO DE COLUNAS
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO", 0.0, "R$ 0.00"] for f in prod_faltantes]
                 pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), prod_faltantes, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
