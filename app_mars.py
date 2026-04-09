@@ -4,6 +4,7 @@ import os
 import unicodedata
 import smtplib
 import gspread
+import re  # ADICIONADO PARA CORREÇÃO CHICOTE
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -129,7 +130,11 @@ def carregar_vendas():
         return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
-    nome_arquivo = f"Oportunidades_{loja.replace(' ', '_')}.pdf"
+    # --- AJUSTE CHICOTE: Limpeza do nome do arquivo para evitar erro FileNotFoundError ---
+    loja_limpa = re.sub(r'[^\w\s-]', '', loja).strip().replace(' ', '_')
+    nome_arquivo = f"Oportunidades_{loja_limpa}.pdf"
+    # -----------------------------------------------------------------------------------
+
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
     dt_pdf = obter_horario_brasil()
@@ -245,7 +250,6 @@ else:
                 detalhado_rows = []
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                    # CORREÇÃO: Limpando o R$ do sugerido para enviar como número puro (igual ao gôndola)
                     p_sugerido_limpo = converter_preco(r['SUGERIDO'])
                     detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
                 for f in prod_faltantes:
