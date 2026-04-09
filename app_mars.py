@@ -77,7 +77,7 @@ def salvar_nas_planilhas(resumo, detalhado):
             aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
         except:
             aba_detalhe = spreadsheet.get_worksheet(1)
-        aba_detalhe.append_rows(detalhado)
+        aba_detalhe.append_rows(detalhado, value_input_option='USER_ENTERED')
         return True
     except Exception as e:
         st.error(f"Erro na Planilha: {e}")
@@ -245,11 +245,11 @@ else:
                 detalhado_rows = []
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                    # MUDANÇA REALIZADA: ADICIONADO PREÇO GÔNDOLA E SUGERIDO NA EXPORTAÇÃO
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), r['SUGERIDO']])
+                    # CORREÇÃO: Limpando o R$ do sugerido para enviar como número puro (igual ao gôndola)
+                    p_sugerido_limpo = converter_preco(r['SUGERIDO'])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
                 for f in prod_faltantes:
-                    # MUDANÇA REALIZADA: ADICIONADO ZEROS PARA MANTER PADRÃO DE COLUNAS
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA", 0.0, "R$ 0.00"])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA", 0.0, 0.0])
                 
                 pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
@@ -260,8 +260,7 @@ else:
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
-                # MUDANÇA REALIZADA: ADICIONADO ZEROS PARA MANTER PADRÃO DE COLUNAS
-                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO", 0.0, "R$ 0.00"] for f in prod_faltantes]
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO", 0.0, 0.0] for f in prod_faltantes]
                 pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), prod_faltantes, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
