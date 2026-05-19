@@ -98,7 +98,7 @@ PRODUTOS_FOCAIS = {
     "98903": "WHI GATO CAST CARNE 500G", "98902": "WHI GATO CAST CARNE 900G", "98946": "WHI GATOS CAST PEIXE 900G"
 }
 
-# --- ATUALIZAÇÃO DE ROTAS (LUCIVANIA E MADALLA) ---
+# --- ATUALIZAÇÃO DE ROTAS ---
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
     "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
@@ -109,19 +109,22 @@ ROTAS_MARS = {
     "FERNANDA": ["JUIZ DE FORA"]
 }
 
-# --- FUNÇÃO DE CARREGAMENTO BLINDADA ---
-@st.cache_data(ttl=60)
+# --- FUNÇÃO DE CARREGAMENTO BLINDADA (MODO INVESTIGAÇÃO) ---
+@st.cache_data(ttl=10)
 def carregar_vendas():
     try:
         diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
-        arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
+        
+        # Pega a lista exata de todos os arquivos que o servidor está vendo
+        todos_arquivos = os.listdir(diretorio_atual)
+        
+        # Tenta achar o arquivo de vendas
+        arquivos = [f for f in todos_arquivos if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
         
         if not arquivos:
-            arquivos = [f for f in os.listdir(".") if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
-            diretorio_atual = "."
-            
-        if not arquivos:
-            st.error("🚨 Arquivo de Vendas não encontrado! Verifique se ele começa com 'VENDAS' e está no GitHub.")
+            st.error("🚨 Arquivo de Vendas não encontrado!")
+            # Esta linha amarela vai dedurar o nome real de todos os arquivos!
+            st.warning(f"🕵️ INVESTIGAÇÃO - O servidor enxerga estes arquivos na pasta: {todos_arquivos}")
             return pd.DataFrame()
             
         caminho_final = os.path.join(diretorio_atual, arquivos[0])
@@ -129,11 +132,9 @@ def carregar_vendas():
         # Tenta ler no padrão normal (UTF-8) com separador ponto e vírgula
         try:
             df = pd.read_csv(caminho_final, sep=';', encoding='utf-8-sig')
-        # Se falhar por causa de acentos/padrão Windows, tenta no formato Latin1
         except UnicodeDecodeError:
             df = pd.read_csv(caminho_final, sep=';', encoding='latin1')
         except Exception:
-            # Se for outro erro, tenta deixar o pandas descobrir o separador
             df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
 
         df.columns = [str(c).strip().upper() for c in df.columns]
@@ -144,7 +145,6 @@ def carregar_vendas():
         return df
         
     except Exception as e:
-        # Agora o erro vai aparecer na tela em vermelho, e não ficar escondido!
         st.error(f"🚨 O arquivo foi achado, mas falhou ao ser lido pelo Pandas: {e}")
         return pd.DataFrame()
 
