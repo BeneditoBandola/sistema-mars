@@ -4,7 +4,7 @@ import os
 import unicodedata
 import smtplib
 import gspread
-import re  # ADICIONADO PARA CORREÇÃO CHICOTE
+import re
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -16,6 +16,16 @@ from reportlab.lib import colors
 
 # --- CONFIGURAÇÃO VISUAL ---
 st.set_page_config(page_title="MARS - Oportunidades", page_icon="🐾", layout="wide")
+
+# ==========================================
+# 🕵️ MODO DE EMERGÊNCIA - DIAGNÓSTICO REAL
+# ==========================================
+st.sidebar.error("🚨 ARQUIVOS VISTOS PELO SERVIDOR:")
+try:
+    st.sidebar.write(os.listdir("."))
+except Exception as e:
+    st.sidebar.write(f"Erro ao ler pasta: {e}")
+# ==========================================
 
 st.markdown("""
     <style>
@@ -109,27 +119,19 @@ ROTAS_MARS = {
     "FERNANDA": ["JUIZ DE FORA"]
 }
 
-# --- FUNÇÃO DE CARREGAMENTO BLINDADA (MODO INVESTIGAÇÃO) ---
-@st.cache_data(ttl=10)
+# --- FUNÇÃO DE CARREGAMENTO (CACHE TOTALMENTE REMOVIDO) ---
 def carregar_vendas():
     try:
-        diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
-        
-        # Pega a lista exata de todos os arquivos que o servidor está vendo
-        todos_arquivos = os.listdir(diretorio_atual)
-        
-        # Tenta achar o arquivo de vendas
-        arquivos = [f for f in todos_arquivos if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
+        diretorio_atual = "."
+        arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
         
         if not arquivos:
-            st.error("🚨 Arquivo de Vendas não encontrado!")
-            # Esta linha amarela vai dedurar o nome real de todos os arquivos!
-            st.warning(f"🕵️ INVESTIGAÇÃO - O servidor enxerga estes arquivos na pasta: {todos_arquivos}")
+            st.error("🚨 O ARQUIVO QUE COMEÇA COM 'VENDAS' NÃO ESTÁ NA PASTA! Verifique a lista na barra lateral.")
             return pd.DataFrame()
             
-        caminho_final = os.path.join(diretorio_atual, arquivos[0])
+        caminho_final = arquivos[0]
+        st.info(f"✅ Arquivo encontrado: {caminho_final}. Tentando ler os dados...")
         
-        # Tenta ler no padrão normal (UTF-8) com separador ponto e vírgula
         try:
             df = pd.read_csv(caminho_final, sep=';', encoding='utf-8-sig')
         except UnicodeDecodeError:
@@ -145,14 +147,12 @@ def carregar_vendas():
         return df
         
     except Exception as e:
-        st.error(f"🚨 O arquivo foi achado, mas falhou ao ser lido pelo Pandas: {e}")
+        st.error(f"🚨 O arquivo foi achado, mas ocorreu um erro de leitura do Pandas. Detalhe exato: {e}")
         return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
-    # --- AJUSTE CHICOTE: Limpeza do nome do arquivo para evitar erro FileNotFoundError ---
     loja_limpa = re.sub(r'[^\w\s-]', '', loja).strip().replace(' ', '_')
     nome_arquivo = f"Oportunidades_{loja_limpa}.pdf"
-    # -----------------------------------------------------------------------------------
 
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
@@ -214,9 +214,10 @@ if 'user_mars' not in st.session_state:
             st.rerun()
 else:
     df_vendas = carregar_vendas()
+    
     if df_vendas.empty:
         st.warning("Aguardando carregamento de arquivos ou resolvendo pendências acima...")
-        if st.button("Voltar"):
+        if st.button("Voltar para Início"):
             del st.session_state.user_mars
             st.rerun()
         st.stop()
