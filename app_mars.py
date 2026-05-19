@@ -60,7 +60,7 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     
     try:
         df_p = pd.read_csv(caminho_real, sep=';', encoding='utf-8-sig', on_bad_lines='skip')
-        df_p.columns = [c.strip().upper() for c in df_p.columns]
+        df_p.columns = [str(c).strip().upper() for c in df_p.columns]
         row = df_p[df_p['CÓDIGO'].astype(str).str.strip() == str(codigo_produto).strip()]
         if not row.empty: return converter_preco(row.iloc[0]['PREÇO RECOMENDADO'])
     except: pass
@@ -109,25 +109,43 @@ ROTAS_MARS = {
     "FERNANDA": ["JUIZ DE FORA"]
 }
 
-@st.cache_data(ttl=300)
+# --- FUNÇÃO DE CARREGAMENTO BLINDADA ---
+@st.cache_data(ttl=60)
 def carregar_vendas():
     try:
         diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
         arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
+        
         if not arquivos:
             arquivos = [f for f in os.listdir(".") if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
             diretorio_atual = "."
+            
         if not arquivos:
-            st.error(f"Arquivo de vendas não encontrado! Verifique se ele está no GitHub.")
+            st.error("🚨 Arquivo de Vendas não encontrado! Verifique se ele começa com 'VENDAS' e está no GitHub.")
             return pd.DataFrame()
+            
         caminho_final = os.path.join(diretorio_atual, arquivos[0])
-        df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
-        df.columns = [c.strip().upper() for c in df.columns]
+        
+        # Tenta ler no padrão normal (UTF-8) com separador ponto e vírgula
+        try:
+            df = pd.read_csv(caminho_final, sep=';', encoding='utf-8-sig')
+        # Se falhar por causa de acentos/padrão Windows, tenta no formato Latin1
+        except UnicodeDecodeError:
+            df = pd.read_csv(caminho_final, sep=';', encoding='latin1')
+        except Exception:
+            # Se for outro erro, tenta deixar o pandas descobrir o separador
+            df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
+
+        df.columns = [str(c).strip().upper() for c in df.columns]
+        
         if 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
+            
         return df
+        
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+        # Agora o erro vai aparecer na tela em vermelho, e não ficar escondido!
+        st.error(f"🚨 O arquivo foi achado, mas falhou ao ser lido pelo Pandas: {e}")
         return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
@@ -197,7 +215,7 @@ if 'user_mars' not in st.session_state:
 else:
     df_vendas = carregar_vendas()
     if df_vendas.empty:
-        st.error("Aguardando carregamento de arquivos...")
+        st.warning("Aguardando carregamento de arquivos ou resolvendo pendências acima...")
         if st.button("Voltar"):
             del st.session_state.user_mars
             st.rerun()
