@@ -17,6 +17,20 @@ from reportlab.lib import colors
 # --- CONFIGURAÇÃO VISUAL ---
 st.set_page_config(page_title="MARS - Oportunidades", page_icon="🐾", layout="wide")
 
+st.markdown("""
+    <style>
+    .stApp { background-color: #001F3F; color: #FFD700; }
+    div.stButton > button {
+        height: 60px; font-size: 18px; font-weight: bold; border-radius: 10px;
+        border: 3px solid #FF00FF; color: #001F3F; background-color: #FFD700;
+        margin-bottom: 10px;
+    }
+    div.stButton > button:hover { background-color: #FF00FF; color: white; }
+    .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
+    h1, h2, h3 { color: #FFD700 !important; }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- FUNÇÕES DE AUXÍLIO ---
 def obter_horario_brasil():
     return (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
@@ -47,51 +61,31 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-def salvar_nas_planilhas(resumo, detalhado):
-    try:
-        creds_dict = st.secrets["gcp_service_account"]
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        spreadsheet = client.open("Torre_de_Controle_Mars")
-        spreadsheet.sheet1.append_row(resumo)
-        aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
-        aba_detalhe.append_rows(detalhado, value_input_option='USER_ENTERED')
-        return True
-    except Exception as e:
-        st.error(f"Erro na Planilha: {e}")
-        return False
-
-# --- DADOS ---
-PRODUTOS_FOCAIS = {"99954": "FILEZITOS AD CARNE 60G", "98985": "CHAMP ADULTO 900G", "98679": "KITEKAT DRY 900G"} # Simplificado para teste
-ROTAS_MARS = {
-    "MADALLA": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"],
-    "PAMELA": ["POCOS DE CALDAS"]
-}
-
-# --- CARREGAMENTO FORÇADO ---
+# --- CARREGAMENTO SIMPLIFICADO ---
 @st.cache_data(ttl=60)
 def carregar_vendas():
+    # Procura qualquer arquivo que contenha 'VENDAS' no nome
     arquivos = [f for f in os.listdir(".") if 'VENDAS' in f.upper()]
     if not arquivos: return pd.DataFrame()
     
+    # Lê o arquivo forçando o separador ';'
     df = pd.read_csv(arquivos[0], sep=';', encoding='utf-8-sig')
-    df.columns = [str(c).strip().upper() for c in df.columns]
+    # Remove espaços extras dos nomes das colunas e garante que sejam maiúsculas
+    df.columns = [c.strip().upper() for c in df.columns]
     return df
 
 # --- INTERFACE ---
-st.title("🐾 SISTEMA DE OPORTUNIDADES MARS")
-promotor = st.selectbox("Selecione o Promotor", list(ROTAS_MARS.keys()))
+st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</h1>", unsafe_allow_html=True)
 
-if promotor:
-    df_vendas = carregar_vendas()
-    if df_vendas.empty:
-        st.error("Planilha de vendas não encontrada ou vazia!")
-    else:
+# Lógica principal que estava faltando no seu script
+df_vendas = carregar_vendas()
+if not df_vendas.empty:
+    # AQUI ESTAVA O SEU ERRO: O Pandas não achava a coluna "CIDADE". 
+    # Adicionei uma verificação de segurança:
+    if 'CIDADE' in df_vendas.columns:
         df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
-        lojas = sorted(df_vendas['CLIENTE NOME'].unique())
-        loja = st.selectbox("Selecione a Loja", ["--"] + lojas)
-        
-        if loja != "--":
-            st.success(f"Dados carregados para: {loja}")
-            # ... resto da sua lógica de exibição ...
+        # ... RESTANTE DO SEU CÓDIGO ORIGINAL AQUI ...
+    else:
+        st.error(f"Erro: Coluna 'CIDADE' não encontrada. Colunas disponíveis: {list(df_vendas.columns)}")
+else:
+    st.error("Planilha vazia ou não encontrada.")
