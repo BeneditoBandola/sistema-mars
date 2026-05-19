@@ -17,16 +17,6 @@ from reportlab.lib import colors
 # --- CONFIGURAÇÃO VISUAL ---
 st.set_page_config(page_title="MARS - Oportunidades", page_icon="🐾", layout="wide")
 
-# ==========================================
-# 🕵️ MODO DE EMERGÊNCIA - DIAGNÓSTICO REAL
-# ==========================================
-st.sidebar.error("🚨 ARQUIVOS VISTOS PELO SERVIDOR:")
-try:
-    st.sidebar.write(os.listdir("."))
-except Exception as e:
-    st.sidebar.write(f"Erro ao ler pasta: {e}")
-# ==========================================
-
 st.markdown("""
     <style>
     .stApp { background-color: #001F3F; color: #FFD700; }
@@ -119,35 +109,44 @@ ROTAS_MARS = {
     "FERNANDA": ["JUIZ DE FORA"]
 }
 
-# --- FUNÇÃO DE CARREGAMENTO (CACHE TOTALMENTE REMOVIDO) ---
+# --- FUNÇÃO DE CARREGAMENTO DEFINITIVA ---
+@st.cache_data(ttl=60)
 def carregar_vendas():
+    arquivo = "VENDAS.csv"
+    
+    if not os.path.exists(arquivo):
+        st.error(f"🚨 Arquivo {arquivo} sumiu da pasta!")
+        return pd.DataFrame()
+        
     try:
-        diretorio_atual = "."
-        arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
-        
-        if not arquivos:
-            st.error("🚨 O ARQUIVO QUE COMEÇA COM 'VENDAS' NÃO ESTÁ NA PASTA! Verifique a lista na barra lateral.")
-            return pd.DataFrame()
-            
-        caminho_final = arquivos[0]
-        st.info(f"✅ Arquivo encontrado: {caminho_final}. Tentando ler os dados...")
-        
+        # Tenta ler no padrão normal (UTF-8) com separador ponto e vírgula
         try:
-            df = pd.read_csv(caminho_final, sep=';', encoding='utf-8-sig')
+            df = pd.read_csv(arquivo, sep=';', encoding='utf-8-sig')
         except UnicodeDecodeError:
-            df = pd.read_csv(caminho_final, sep=';', encoding='latin1')
+            df = pd.read_csv(arquivo, sep=';', encoding='latin1')
         except Exception:
-            df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
+            df = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8-sig')
 
+        if df.empty:
+            st.error("🚨 A planilha VENDAS.csv foi lida, mas está completamente VAZIA (sem linhas).")
+            return pd.DataFrame()
+
+        # Limpa o nome das colunas
         df.columns = [str(c).strip().upper() for c in df.columns]
         
+        # VALIDAÇÃO DE SEGURANÇA (Se as colunas não existirem, o Excel salvou grudado)
+        if 'CIDADE' not in df.columns or 'CLIENTE NOME' not in df.columns:
+            st.error("🚨 As colunas 'CIDADE' e 'CLIENTE NOME' não foram encontradas! O servidor não conseguiu separar o arquivo CSV corretamente.")
+            st.warning(f"🕵️ Colunas que o servidor enxergou (grudadas): {list(df.columns)}")
+            return pd.DataFrame()
+
         if 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
             
         return df
         
     except Exception as e:
-        st.error(f"🚨 O arquivo foi achado, mas ocorreu um erro de leitura do Pandas. Detalhe exato: {e}")
+        st.error(f"🚨 Falha crítica do Pandas ao ler os dados do arquivo VENDAS.csv: {e}")
         return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
