@@ -144,7 +144,7 @@ CONFIG_ROTEIRO = "config_roteiro.json"
 REGISTRO_VISITAS = "visitas_realizadas.json"
 ARQ_GRUPOS = "config_grupos.json"
 ARQ_STATUS = "status_clientes.json" 
-ARQ_FREQUENCIA = "frequencia_clientes.json" # NOVO ARQUIVO DA AGENDA
+ARQ_FREQUENCIA = "frequencia_clientes.json" 
 PASTA_SISTEMA = os.path.dirname(os.path.abspath(__file__))
 
 def extrair_link_iframe(texto):
@@ -152,7 +152,7 @@ def extrair_link_iframe(texto):
     match = re.search(r'src="([^"]+)"', texto)
     return match.group(1) if match else texto.strip()
 
-# --- 2. FUNÇÕES DE PERSISTÊNCIA E LIMPEZA COM GERAÇÃO AUTOMÁTICA DE JSON ---
+# --- 2. FUNÇÕES DE PERSISTÊNCIA E GERAÇÃO DE JSON ---
 def carregar_config():
     caminho = os.path.join(PASTA_SISTEMA, CONFIG_ROTEIRO)
     padrao = {"promotores": {}, "mapas_cidades": {}, "casas": {}}
@@ -226,7 +226,6 @@ def remover_status(cod_cliente):
         caminho = os.path.join(PASTA_SISTEMA, ARQ_STATUS)
         with open(caminho, 'w', encoding='utf-8') as f: json.dump(stats, f, indent=4, ensure_ascii=False)
 
-# --- FUNÇÕES DE FREQUÊNCIA FIXA ---
 def carregar_frequencia():
     caminho = os.path.join(PASTA_SISTEMA, ARQ_FREQUENCIA)
     if not os.path.exists(caminho):
@@ -240,7 +239,6 @@ def salvar_frequencia(dados):
     caminho = os.path.join(PASTA_SISTEMA, ARQ_FREQUENCIA)
     with open(caminho, 'w', encoding='utf-8') as f: json.dump(dados, f, indent=4, ensure_ascii=False)
 
-# --- LÓGICA DE MÚLTIPLAS VISITAS ---
 def registrar_visita(cod_cliente):
     visitas = carregar_visitas()
     cod_str = str(cod_cliente)
@@ -355,7 +353,6 @@ def gerar_pdf_cliente_local(nome_cli, cod_cli, df_compras, periodos, c_fam, col_
     qtd_oportunidades = len(small_bags_encontrados)
     pdf.cell(0, 8, f"QUANTIDADE DE OPORTUNIDADES NESTE CLIENTE: {qtd_oportunidades}", ln=True, fill=True)
     
-    # Retorna o PDF em bytes para o download em ambiente de nuvem
     return pdf.output(dest='S').encode('latin1')
 
 def gerar_pdf_leituras(promotor, cidades_alvo, df_rot, df_vendas, periodos, c_fam, col_v, col_cli_nome, col_prod, pasta, todos_periodos, grupos_selecionados, grupos_cadastrados):
@@ -828,7 +825,6 @@ if vendas_f and clientes_f:
                 opcoes_grupos_rel = list(grupos_cadastrados_rel.keys())
                 grupos_selecionados_rel = st.multiselect("🎯 Selecionar Grupos para Leitura:", opcoes_grupos_rel)
                 
-                # Fluxo de Geração Online (Botão de Download no Streamlit)
                 v_cols = sorted([c for c in df_vendas_total.columns if 'QTD' in c and 'ABERTO' not in c and 'TOTAL' not in c])[-3:]
                 todos_periodos = sorted([c for c in df_vendas_total.columns if 'QTD' in c and 'ABERTO' not in c and 'TOTAL' not in c])
                 
@@ -1066,7 +1062,6 @@ if vendas_f and clientes_f:
         opcoes_grupos = list(grupos_cadastrados.keys())
         grupos_selecionados = st.multiselect("🎯 Limitar visitas complementares a clientes que compram estes Grupos (Opcional):", opcoes_grupos)
         
-        # --- BUSCA OS FIXOS ANTES PARA FURAR O BLOQUEIO DE VISITADOS ---
         freq_db = carregar_frequencia()
         codigos_fixos_hoje = []
         if prom_ativo in freq_db:
@@ -1074,7 +1069,6 @@ if vendas_f and clientes_f:
                 if dia_semana_atual in dias_lista:
                     codigos_fixos_hoje.append(str(cod_cli_f))
         
-        # --- EXCLUSÃO DOS PULADOS NA BASE ANTES DE QUALQUER OPERAÇÃO ---
         ranking_filtrado_proxima = ranking_ativos[~ranking_ativos[col_v].astype(str).isin(st.session_state.ocultos_roteiro)].copy()
         
         cond_pendentes = ranking_filtrado_proxima['QTD_FEITAS'] < ranking_filtrado_proxima['META_VISITAS']
@@ -1187,4 +1181,258 @@ if vendas_f and clientes_f:
                         current_lon = rota_list[-1][col_lon]
                         
                         while len(rota_list) < max_visitas and not df_restante.empty:
-                            df_restante['DIST_TEMP'] = df_restante.apply(lambda r: calcular_distancia(current_lat, current_lon, r[col_lat], r
+                            df_restante['DIST_TEMP'] = df_restante.apply(lambda r: calcular_distancia(current_lat, current_lon, r[col_lat], r[col_lon]), axis=1)
+                            closest_idx = df_restante['DIST_TEMP'].idxmin()
+                            closest_row = df_restante.loc[closest_idx].to_dict()
+                            
+                            closest_row['ANCORA'] = False
+                            closest_row['TXT_TIPO'] = "🔄 Complementar"
+                            rota_list.append(pd.Series(closest_row))
+                            
+                            current_lat = closest_row[col_lat]
+                            current_lon = closest_row[col_lon]
+                            df_restante = df_restante.drop(closest_idx)
+                            
+                    else:
+                        df_restante = df_restante.sort_values(by='POT_FILTRADO', ascending=False)
+                        for _, r_row in df_restante.head(vagas_restantes).iterrows():
+                            r_dict = r_row.to_dict()
+                            r_dict['ANCORA'] = False
+                            r_dict['TXT_TIPO'] = "🔄 Complementar"
+                            rota_list.append(pd.Series(r_dict))
+                            
+                df_rota = pd.DataFrame(rota_list).reset_index(drop=True)
+                
+                if not df_rota.empty:
+                    col_m1, col_m2 = st.columns([2, 1])
+                    
+                    with col_m1:
+                        centro_lat = df_rota[col_lat].mean()
+                        centro_lon = df_rota[col_lon].mean()
+                        m_rot = folium.Map(location=[centro_lat, centro_lon], zoom_start=13, tiles="CartoDB positron")
+                        
+                        pontos_rota = []
+                        
+                        if prom_ativo in config.get("casas", {}):
+                            casa = config["casas"][prom_ativo]
+                            try:
+                                lat_c = float(casa["lat"].replace(',', '.'))
+                                lon_c = float(casa["lon"].replace(',', '.'))
+                                folium.Marker(
+                                    [lat_c, lon_c],
+                                    popup=f"<b>INÍCIO</b><br>Casa de {prom_ativo}<br>{casa.get('end', '')}",
+                                    tooltip="Ponto de Partida",
+                                    icon=folium.Icon(color='red', icon='home')
+                                ).add_to(m_rot)
+                                pontos_rota.append([lat_c, lon_c])
+                            except: pass
+                            
+                        for i, row in df_rota.iterrows():
+                            lat_r = row[col_lat]
+                            lon_r = row[col_lon]
+                            pontos_rota.append([lat_r, lon_r])
+                            
+                            nome_c_f = row.get(col_cliente_nome, 'Cliente')
+                            pot_c = row['POT_FILTRADO']
+                            ordem = i + 1
+                            
+                            if row['ANCORA']:
+                                cor_pino = 'blue'
+                                icone = 'star'
+                                txt_tipo = row['TXT_TIPO']
+                            else:
+                                cor_pino = 'orange'
+                                icone = 'info-sign'
+                                txt_tipo = row['TXT_TIPO']
+                                
+                            popup_html = f"""
+                            <div style='font-family: Arial;'>
+                                <b>Parada #{ordem}</b><br>
+                                <h4 style='margin: 5px 0;'>{nome_c_f}</h4>
+                                <span style='color:{cor_pino}'>{txt_tipo}</span><br>
+                                Potencial: R$ {pot_c:,.2f}
+                            </div>
+                            """
+                            
+                            folium.Marker(
+                                [lat_r, lon_r],
+                                popup=folium.Popup(popup_html, max_width=300),
+                                tooltip=f"#{ordem} - {nome_c_f}",
+                                icon=folium.Icon(color=cor_pino, icon=icone)
+                            ).add_to(m_rot)
+                            
+                        distancia_total_km = 0.0
+                        if len(pontos_rota) > 1:
+                            folium.PolyLine(pontos_rota, color="red", weight=2.5, opacity=0.7).add_to(m_rot)
+                            for pt in range(len(pontos_rota)-1):
+                                lat1, lon1 = pontos_rota[pt]
+                                lat2, lon2 = pontos_rota[pt+1]
+                                distancia_total_km += calcular_distancia(lat1, lon1, lat2, lon2)
+                            
+                        st_folium(m_rot, width="100%", height=600, returned_objects=[])
+                        
+                    with col_m2:
+                        st.markdown(f"### 📋 Sequência para {dia_semana_atual}")
+                        
+                        if len(pontos_rota) > 1:
+                            st.info(f"🛣️ **Distância Estimada:** ~{distancia_total_km:.1f} km (linha reta)")
+                            
+                        if prom_ativo in config.get("casas", {}):
+                            st.markdown(f"**🏠 Ponto de Partida:** Casa de {prom_ativo}")
+                            st.divider()
+                            
+                        for i, row in df_rota.iterrows():
+                            icone = "📌" if "FIXO" in row['TXT_TIPO'] else ("🔵" if row['ANCORA'] else "🟠")
+                            cod_cli_rota = row[col_v]
+                            st.markdown(f"**{icone} #{i+1} | Cód: {cod_cli_rota} - {row.get(col_cliente_nome, 'N/A')}**")
+                            st.markdown(f"_{row['TXT_TIPO']}_ | 💰 R$ {row['POT_FILTRADO']:,.2f}")
+                            
+                            c_roi_btn1, c_roi_btn2 = st.columns(2)
+                            with c_roi_btn1:
+                                if st.button("🚫 Desprezar", key=f"desp_roi_{cod_cli_rota}_{i}", use_container_width=True):
+                                    registrar_visita(cod_cli_rota)
+                                    st.rerun()
+                            with c_roi_btn2:
+                                if st.button("⏭️ Deixar p/ Próxima", key=f"prox_roi_{cod_cli_rota}_{i}", use_container_width=True):
+                                    st.session_state.ocultos_roteiro.append(str(cod_cli_rota))
+                                    st.rerun()
+                                    
+                            st.divider()
+
+                    st.divider()
+                    st.markdown("### ⚡ Ações do Roteiro")
+                    
+                    c_act1, c_act2 = st.columns(2)
+                    with c_act1:
+                        if st.button("✅ MARCAR TODO O ROTEIRO AS VISITADO", use_container_width=True):
+                            for _, r_rota in df_rota.iterrows():
+                                registrar_visita(r_rota[col_v])
+                            st.session_state.ocultos_roteiro = []
+                            st.rerun()
+                    with c_act2:
+                        if st.session_state.ocultos_roteiro:
+                            if st.button("🔄 Restaurar 'Deixados para Próxima' (" + str(len(st.session_state.ocultos_roteiro)) + ")", use_container_width=True):
+                                st.session_state.ocultos_roteiro = []
+                                st.rerun()
+
+                    pdf_hoje = FPDF()
+                    pdf_hoje.add_page()
+                    pdf_hoje.set_font("Arial", 'B', 16)
+                    pdf_hoje.cell(0, 10, f"ROTEIRO DE VISITAS DIARIO", ln=True, align='C')
+                    pdf_hoje.set_font("Arial", 'B', 11)
+                    
+                    prom_limpo = unicodedata.normalize('NFKD', str(prom_ativo)).encode('ASCII', 'ignore').decode('utf-8')
+                    cid_limpa = unicodedata.normalize('NFKD', str(cidade_dia_sel)).encode('ASCII', 'ignore').decode('utf-8')
+                    data_hoje = data_roteiro.strftime("%d/%m/%Y")
+                    
+                    pdf_hoje.cell(0, 8, f"Data Roteiro: {data_hoje} ({dia_semana_atual}) | Promotor: {prom_limpo} | Cidade: {cid_limpa}", ln=True, align='C')
+                    pdf_hoje.ln(5)
+                    
+                    pdf_hoje.set_font("Arial", 'I', 10)
+                    pdf_hoje.cell(0, 6, f"Ola {prom_limpo}, este e o seu roteiro estrategico planejado.", ln=True, align='C')
+                    pdf_hoje.cell(0, 6, "Abaixo estao os clientes na ordem de visita com seus historicos de compra.", ln=True, align='C')
+                    pdf_hoje.ln(8)
+                    
+                    v_cols_pdf = sorted([c for c in df_vendas_total.columns if 'QTD' in c and 'ABERTO' not in c and 'TOTAL' not in c])[-3:]
+                    todos_periodos_pdf = sorted([c for c in df_vendas_total.columns if 'QTD' in c and 'ABERTO' not in c and 'TOTAL' not in c])
+                    
+                    for idx_r, row_r in df_rota.iterrows():
+                        cod_c_pdf = row_r[col_v]
+                        nome_c_pdf = str(row_r.get(col_cliente_nome, 'NÃO INFORMADO'))
+                        nome_limpo_pdf = unicodedata.normalize('NFKD', nome_c_pdf).encode('ASCII', 'ignore').decode('utf-8')
+                        bairro_c_pdf = unicodedata.normalize('NFKD', str(row_r.get(col_bairro_exibir, ''))).encode('ASCII', 'ignore').decode('utf-8')
+                        end_c_pdf = unicodedata.normalize('NFKD', str(row_r.get(col_end_exibir, ''))).encode('ASCII', 'ignore').decode('utf-8')
+                        txt_tipo_pdf = unicodedata.normalize('NFKD', row_r['TXT_TIPO']).encode('ASCII', 'ignore').decode('utf-8')
+                        
+                        pdf_hoje.set_fill_color(220, 235, 255)
+                        pdf_hoje.set_font("Arial", 'B', 11)
+                        pdf_hoje.cell(0, 8, f" PARADA #{idx_r+1} | {cod_c_pdf} - {nome_limpo_pdf}", fill=True, ln=True)
+                        
+                        pdf_hoje.set_font("Arial", 'I', 8)
+                        pdf_hoje.cell(0, 5, f" Tipo: {txt_tipo_pdf}", ln=True)
+                        if end_c_pdf != 'NAN' and end_c_pdf != '':
+                            pdf_hoje.cell(0, 5, f" Endereço: {end_c_pdf} - Bairro: {bairro_c_pdf}", ln=True)
+                        pdf_hoje.ln(2)
+                        
+                        df_det_pdf = df_vendas_filtrado[df_vendas_filtrado[col_v] == cod_c_pdf]
+                        if not df_det_pdf.empty:
+                            df_det_grouped_pdf = df_det_pdf.groupby([col_prod, 'PRODUTO NOME', col_fam])[todos_periodos_pdf].sum().reset_index()
+                            v_recentes_pdf = df_det_grouped_pdf[df_det_grouped_pdf[v_cols_pdf].sum(axis=1) > 0]
+                            
+                            if not v_recentes_pdf.empty:
+                                grupos_comprados_cli = []
+                                if grupos_selecionados:
+                                    for g_nome in grupos_selecionados:
+                                        raw_g = grupos_cadastrados.get(g_nome, {}).get("codigos", [])
+                                        if isinstance(raw_g, str):
+                                            g_cods = [c.strip().replace('.0', '') for c in re.split(r'[,\n\s]+', raw_g) if c.strip()]
+                                        else:
+                                            g_cods = []
+                                            for item in raw_g:
+                                                g_cods.extend([c.strip().replace('.0', '') for c in re.split(r'[,\n\s]+', str(item)) if c.strip()])
+                                                
+                                        if any(str(r.get(col_prod, '')).strip().replace('.0', '') in g_cods for _, r in v_recentes_pdf.iterrows()):
+                                            grupos_comprados_cli.append(g_nome)
+                                            
+                                    if grupos_comprados_cli:
+                                        pdf_hoje.set_text_color(220, 38, 38)
+                                        pdf_hoje.set_font("Arial", 'B', 10)
+                                        nomes_juntos = ", ".join(grupos_comprados_cli)
+                                        nome_grupo_limpo = unicodedata.normalize('NFKD', nomes_juntos).encode('ASCII', 'ignore').decode('utf-8')
+                                        pdf_hoje.cell(0, 6, f"ATENCAO: Cliente comprou {nome_grupo_limpo}", ln=True)
+                                        pdf_hoje.set_text_color(0, 0, 0)
+                                        pdf_hoje.ln(2)
+
+                                pdf_hoje.set_font("Arial", 'B', 8)
+                                pdf_hoje.cell(90, 6, "PRODUTO", border=1)
+                                w_p_pdf = 80 / len(v_cols_pdf) if v_cols_pdf else 20
+                                for p in v_cols_pdf:
+                                    p_name_pdf = p.replace('QTD', '').replace('P2026-', 'P-').strip()
+                                    pdf_hoje.cell(w_p_pdf, 6, p_name_pdf, border=1, align='C')
+                                pdf_hoje.ln()
+                                
+                                for _, r_prod in v_recentes_pdf.iterrows():
+                                    p_n_pdf = unicodedata.normalize('NFKD', str(r_prod['PRODUTO NOME'])).encode('ASCII', 'ignore').decode('utf-8')[:45]
+                                    cod_prod_atual = str(r_prod.get(col_prod, '')).strip().replace('.0', '')
+                                    if grupos_selecionados and cod_prod_atual in cods_grupo:
+                                        pdf_hoje.set_text_color(220, 38, 38)
+                                        pdf_hoje.set_font("Arial", 'B', 7)
+                                    else:
+                                        pdf_hoje.set_text_color(0, 0, 0)
+                                        pdf_hoje.set_font("Arial", '', 7)
+
+                                    pdf_hoje.cell(90, 6, p_n_pdf, border=1)
+                                    for p in v_cols_pdf:
+                                        val_p = r_prod.get(p, 0)
+                                        val_str_p = f"{int(val_p)}" if val_p == int(val_p) else f"{val_p:.2f}".replace('.', ',')
+                                        pdf_hoje.cell(w_p_pdf, 6, val_str_p, border=1, align='C')
+                                    pdf_hoje.ln()
+                                pdf_hoje.set_text_color(0, 0, 0) 
+                            else:
+                                pdf_hoje.set_font("Arial", 'I', 8)
+                                pdf_hoje.cell(0, 6, " Sem compras recentes para os filtros antigos.", ln=True)
+                        else:
+                            pdf_hoje.set_font("Arial", 'I', 8)
+                            pdf_hoje.cell(0, 6, " Sem historico encontrado.", ln=True)
+                        pdf_hoje.ln(5)
+                        
+                        if pdf_hoje.get_y() > 250:
+                            pdf_hoje.add_page()
+                            
+                    pdf_bytes_hoje = pdf_hoje.output(dest='S').encode('latin1')
+                    
+                    st.download_button(
+                        label="📄 Gerar e Baixar PDF do Roteiro de Hoje",
+                        data=pdf_bytes_hoje,
+                        file_name=f"Roteiro_Dia_{prom_ativo.replace(' ', '')}.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True
+                    )
+            else:
+                st.success("🎉 Nenhum cliente pendente encontrado para esta cidade e filtros!")
+        else:
+            st.warning("Colunas de Latitude e Longitude não foram encontradas para gerar a rota.")
+
+else:
+    st.info("👋 Carregue as planilhas para iniciar.")
