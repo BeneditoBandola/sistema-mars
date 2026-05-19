@@ -17,20 +17,6 @@ from reportlab.lib import colors
 # --- CONFIGURAÇÃO VISUAL ---
 st.set_page_config(page_title="MARS - Oportunidades", page_icon="🐾", layout="wide")
 
-st.markdown("""
-    <style>
-    .stApp { background-color: #001F3F; color: #FFD700; }
-    div.stButton > button {
-        height: 60px; font-size: 18px; font-weight: bold; border-radius: 10px;
-        border: 3px solid #FF00FF; color: #001F3F; background-color: #FFD700;
-        margin-bottom: 10px;
-    }
-    div.stButton > button:hover { background-color: #FF00FF; color: white; }
-    .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
-    h1, h2, h3 { color: #FFD700 !important; }
-    </style>
-""", unsafe_allow_html=True)
-
 # --- FUNÇÕES DE AUXÍLIO ---
 def obter_horario_brasil():
     return (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
@@ -61,31 +47,43 @@ def buscar_preco_na_tabela(arquivo, codigo_produto):
     except: pass
     return 0.0
 
-# --- CARREGAMENTO SIMPLIFICADO ---
+# --- CARREGAMENTO CORRIGIDO ---
 @st.cache_data(ttl=60)
 def carregar_vendas():
-    # Procura qualquer arquivo que contenha 'VENDAS' no nome
-    arquivos = [f for f in os.listdir(".") if 'VENDAS' in f.upper()]
-    if not arquivos: return pd.DataFrame()
-    
-    # Lê o arquivo forçando o separador ';'
-    df = pd.read_csv(arquivos[0], sep=';', encoding='utf-8-sig')
-    # Remove espaços extras dos nomes das colunas e garante que sejam maiúsculas
-    df.columns = [c.strip().upper() for c in df.columns]
-    return df
+    try:
+        arquivos = [f for f in os.listdir(".") if 'VENDAS' in f.upper()]
+        if not arquivos: return pd.DataFrame()
+        
+        # Leitura forçada com utf-8-sig (remove o caractere invisível \ufeff)
+        df = pd.read_csv(arquivos[0], sep=';', encoding='utf-8-sig')
+        
+        # Limpeza robusta das colunas
+        df.columns = [str(c).strip().upper().replace('\ufeff', '') for c in df.columns]
+        return df
+    except Exception as e:
+        st.error(f"Erro na carga: {e}")
+        return pd.DataFrame()
 
-# --- INTERFACE ---
-st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</h1>", unsafe_allow_html=True)
+# --- DADOS E INTERFACE ---
+ROTAS_MARS = {
+    "MADALLA": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"],
+    "PAMELA": ["POCOS DE CALDAS"]
+}
 
-# Lógica principal que estava faltando no seu script
+st.title("🐾 SISTEMA DE OPORTUNIDADES MARS")
 df_vendas = carregar_vendas()
-if not df_vendas.empty:
-    # AQUI ESTAVA O SEU ERRO: O Pandas não achava a coluna "CIDADE". 
-    # Adicionei uma verificação de segurança:
+
+if df_vendas.empty:
+    st.error("Planilha vazia ou não encontrada.")
+else:
+    # A verificação que estava dando erro
     if 'CIDADE' in df_vendas.columns:
         df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
-        # ... RESTANTE DO SEU CÓDIGO ORIGINAL AQUI ...
+        promotor = st.selectbox("Selecione o Promotor", list(ROTAS_MARS.keys()))
+        if promotor:
+            lojas = sorted(df_vendas[df_vendas['CIDADE_BUSCA'].isin([limpar_texto(c) for c in ROTAS_MARS[promotor]])]['CLIENTE NOME'].unique())
+            loja = st.selectbox("Selecione a Loja", ["--"] + lojas)
+            if loja != "--":
+                st.write(f"Trabalhando na loja: {loja}")
     else:
-        st.error(f"Erro: Coluna 'CIDADE' não encontrada. Colunas disponíveis: {list(df_vendas.columns)}")
-else:
-    st.error("Planilha vazia ou não encontrada.")
+        st.error(f"Erro: A coluna 'CIDADE' não foi encontrada. Colunas lidas: {list(df_vendas.columns)}")
