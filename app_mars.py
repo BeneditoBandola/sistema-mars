@@ -227,11 +227,9 @@ else:
         for c, n in PRODUTOS_FOCAIS.items():
             historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
             
-            # Obter data e quantidade da última compra
             info_ultima_compra = ""
             if not historico_item.empty and 'DATA' in historico_item.columns:
                 historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
-                # Encontrar a linha da data mais recente
                 idx_mais_recente = historico_item['DATA_DT'].idxmax()
                 if pd.notna(idx_mais_recente):
                     ultima_linha = historico_item.loc[idx_mais_recente]
@@ -248,10 +246,7 @@ else:
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                if not historico_item.empty:
-                    status_hist = f"🔥 JÁ COMPROU ANTES{info_ultima_compra} (Oportunidade!)"
-                else:
-                    status_hist = "Item Novo / Não Comercializa"
+                status_hist = f"🔥 JÁ COMPROU ANTES{info_ultima_compra} (Oportunidade!)" if not historico_item.empty else "Item Novo / Não Comercializa"
                 prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
@@ -267,8 +262,7 @@ else:
                 for f in prod_faltantes:
                     detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
                 
-                pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, pdf_faltantes_formatado, obs_text)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
                     st.success("Enviado com sucesso!"); st.balloons()
@@ -278,8 +272,7 @@ else:
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
                 detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
-                pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), prod_faltantes, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
