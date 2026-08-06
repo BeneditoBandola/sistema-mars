@@ -14,20 +14,25 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# --- CONFIGURAÇÃO VISUAL ---
-st.set_page_config(page_title="MARS - Oportunidades", page_icon="🐾", layout="wide")
+# --- CONFIGURAÇÃO VISUAL (CLEAN EXECUTIVO) ---
+st.set_page_config(page_title="MARS - Torre de Controle", page_icon="🐾", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #001F3F; color: #FFD700; }
+    .stApp { background-color: #F4F6F9; color: #1F2937; }
     div.stButton > button {
-        height: 60px; font-size: 18px; font-weight: bold; border-radius: 10px;
-        border: 3px solid #FF00FF; color: #001F3F; background-color: #FFD700;
+        height: 55px; font-size: 16px; font-weight: bold; border-radius: 8px;
+        border: 2px solid #1E3A8A; color: #FFFFFF; background-color: #1E3A8A;
         margin-bottom: 10px;
     }
-    div.stButton > button:hover { background-color: #FF00FF; color: white; }
-    .stSelectbox label, .stTextArea label { color: #FFD700 !important; font-weight: bold; }
-    h1, h2, h3 { color: #FFD700 !important; }
+    div.stButton > button:hover { background-color: #059669; border-color: #059669; color: white; }
+    .stSelectbox label, .stTextArea label { color: #1E3A8A !important; font-weight: bold; }
+    h1, h2, h3 { color: #1E3A8A !important; }
+    .info-card {
+        background-color: #FFFFFF; padding: 15px; border-radius: 8px;
+        border-left: 5px solid #1E3A8A; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -52,12 +57,9 @@ def converter_preco(valor):
 def buscar_preco_na_tabela(arquivo, codigo_produto):
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     caminho_real = os.path.join(diretorio_atual, arquivo)
-    
     if not os.path.exists(caminho_real):
         caminho_real = arquivo if os.path.exists(arquivo) else None
-
     if not caminho_real: return 0.0
-    
     try:
         df_p = pd.read_csv(caminho_real, sep=';', encoding='utf-8-sig', on_bad_lines='skip')
         df_p.columns = [c.strip().upper() for c in df_p.columns]
@@ -84,6 +86,35 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
+# --- CARREGAR BASES (VENDAS + CLIENTES) ---
+@st.cache_data(ttl=300)
+def carregar_dados():
+    diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
+    
+    # 1. Vendas
+    df_v = pd.DataFrame()
+    try:
+        caminho_v = os.path.join(diretorio_atual, "VENDAS_ATUALIZADAS_2026.zip")
+        if not os.path.exists(caminho_v): caminho_v = "VENDAS_ATUALIZADAS_2026.zip"
+        df_v = pd.read_csv(caminho_v, sep=';', encoding='utf-8-sig', compression='zip')
+        df_v.columns = [c.strip().upper() for c in df_v.columns]
+        if 'DATA' in df_v.columns:
+            df_v['DATA'] = pd.to_datetime(df_v['DATA'], errors='coerce')
+    except Exception as e:
+        st.error(f"Erro ao carregar vendas: {e}")
+
+    # 2. Clientes (Endereços)
+    df_c = pd.DataFrame()
+    try:
+        caminho_c = os.path.join(diretorio_atual, "CLIENTES.xlsx")
+        if not os.path.exists(caminho_c): caminho_c = "CLIENTES.xlsx"
+        df_c = pd.read_excel(caminho_c)
+        df_c.columns = [c.strip().upper() for c in df_c.columns]
+    except Exception as e:
+        pass # Se falhar, segue sem quebrar o sistema
+
+    return df_v, df_c
+
 # --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
     "99954": "FILEZITOS AD CARNE 60G", "99955": "FILEZITOS AD CHURRASCO 60G", "99956": "FILEZITOS AD FRANGO 60G", "100051": "FILEZITOS AD CHURRASCO 400G",
@@ -98,7 +129,7 @@ PRODUTOS_FOCAIS = {
     "98903": "WHI GATO CAST CARNE 500G", "98902": "WHI GATO CAST CARNE 900G", "98946": "WHI GATOS CAST PEIXE 900G"
 }
 
-# --- ATUALIZAÇÃO DE ROTAS ---
+# --- ROTAS ---
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
     "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
@@ -108,32 +139,6 @@ ROTAS_MARS = {
     "MADALLA": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"], 
     "FERNANDA": ["JUIZ DE FORA"]
 }
-
-@st.cache_data(ttl=300)
-def carregar_vendas():
-    try:
-        diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
-        nome_arquivo = "VENDAS_ATUALIZADAS_2026.zip" 
-        caminho_final = os.path.join(diretorio_atual, nome_arquivo)
-        
-        if not os.path.exists(caminho_final):
-            caminho_final = nome_arquivo
-            if not os.path.exists(caminho_final):
-                st.error(f"🚨 Arquivo '{nome_arquivo}' não encontrado! Verifique se ele está no GitHub.")
-                return pd.DataFrame()
-
-        df = pd.read_csv(caminho_final, sep=';', encoding='utf-8-sig', compression='zip')
-        
-        df.columns = [c.strip().upper() for c in df.columns]
-        
-        if 'DATA' in df.columns:
-            df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
-            
-        return df
-        
-    except Exception as e:
-        st.error(f"Erro ao carregar a planilha de vendas: {e}")
-        return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     loja_limpa = re.sub(r'[^\w\s-]', '', loja).strip().replace(' ', '_')
@@ -147,7 +152,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     elementos.append(Paragraph(f"<b>DATA/HORA:</b> {dt_pdf}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
     if not df_audit.empty:
-        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS</b>", estilos['Heading3']))
+        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS & OPORTUNIDADES</b>", estilos['Heading3']))
         data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
         row_colors = []
         for i, row in enumerate(df_audit.to_dict('records')):
@@ -160,19 +165,17 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 dif = ((p_loja - p_rec) / p_rec) * 100
                 if p_loja > (p_rec + 0.01):
                     sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
-                elif p_loja < (p_rec - 0.01):
-                    sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
                 else:
-                    sit = "CORRETO"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+                    sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
             data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
         t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.navy), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
+        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
         elementos.append(t1)
-    elementos.append(Paragraph("<b>2. OPORTUNIDADES (ITENS NÃO COMERCIALIZADOS)</b>", estilos['Heading3']))
-    data_f = [["Código", "Produto"]]
-    for f in df_faltantes: data_f.append([f[0], f[1]])
-    t2 = Table(data_f, colWidths=[80, 435])
-    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkred), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+    elementos.append(Paragraph("<b>2. ITENS NÃO COMERCIALIZADOS / HISTÓRICO DE OPORTUNIDADE</b>", estilos['Heading3']))
+    data_f = [["Código", "Produto", "Histórico"]]
+    for f in df_faltantes: data_f.append([f[0], f[1], f[2]])
+    t2 = Table(data_f, colWidths=[70, 265, 170])
+    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
     elementos.append(t2)
     if feedback: elementos.append(Paragraph(f"<b>OBS:</b> {feedback}", estilos['Normal']))
     doc.build(elementos); return nome_arquivo
@@ -187,7 +190,7 @@ def enviar_email(assunto, pdf):
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(rem, sen); s.sendmail(rem, dest, msg.as_string()); s.quit(); return True
     except: return False
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPAL ---
 st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</h1>", unsafe_allow_html=True)
 
 if 'user_mars' not in st.session_state:
@@ -198,9 +201,9 @@ if 'user_mars' not in st.session_state:
             st.session_state.user_mars = nome
             st.rerun()
 else:
-    df_vendas = carregar_vendas()
+    df_vendas, df_clientes = carregar_dados()
     if df_vendas.empty:
-        st.error("Aguardando carregamento de arquivos...")
+        st.error("Aguardando carregamento da base de vendas...")
         if st.button("Voltar"):
             del st.session_state.user_mars
             st.rerun()
@@ -236,7 +239,40 @@ else:
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_l = v_loja.iloc[0]['CIDADE']
         
-        # AQUI ESTÁ A CORREÇÃO QUE REMOVE O '.0' E IMPEDE O MIX ZERO:
+        # Identificar código da loja para buscar endereço
+        cod_cliente_atual = v_loja.iloc[0].get('CLIENTE CODIGO', None)
+        
+        # Buscar endereço na planilha CLIENTES.xlsx se disponível
+        endereco_str = "Endereço não cadastrado"
+        bairro_str = ""
+        link_maps = ""
+        
+        if not df_clientes.empty and cod_cliente_atual is not None:
+            cli_match = df_clientes[df_clientes['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(cod_cliente_atual).replace('.0', '').strip()]
+            if not cli_match.empty:
+                end = cli_match.iloc[0].get('ENDEREÇO', '')
+                bai = cli_match.iloc[0].get('BAIRRO', '')
+                uf = cli_match.iloc[0].get('UF', '')
+                if pd.notna(end): endereco_str = str(end)
+                if pd.notna(bai): bairro_str = f" - Bairro: {str(bai)}"
+                if pd.notna(uf): bairro_str += f" ({str(uf)})"
+                
+                # Montar link do Google Maps
+                query_maps = f"{loja} {endereco_str} {cisede := cidade_l}".replace(' ', '+')
+                link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
+
+        # Exibir Cartão de Endereço na Tela
+        st.markdown(f"""
+            <div class="info-card">
+                <b>📍 Endereço da Loja:</b> {endereco_str}{bairro_str}<br>
+                <b>🏙️ Cidade:</b> {cidade_l}
+            </div>
+        """, unsafe_allow_html=True)
+        
+        if link_maps:
+            st.markdown(f"[📍 Abrir Rota no Google Maps / Waze]({link_maps})", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
         comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
         
         dados_audit_view, prod_faltantes = [], []
@@ -246,7 +282,14 @@ else:
                     "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": n, 
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
-            else: prod_faltantes.append([c, n])
+            else:
+                # Inteligência: Verificar se a loja já comprou este item no passado (nas vendas gerais do ano)
+                historico_loja = df_vendas[(df_vendas['CLIENTE NOME'] == loja) & (df_vendas['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c)]
+                if not historico_loja.empty:
+                    status_hist = "🔥 JÁ COMPROU ANTES (Oportunidade!)"
+                else:
+                    status_hist = "Item Novo / Não Comercializa"
+                prod_faltantes.append([c, n, status_hist])
         
         if dados_audit_view:
             df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
@@ -257,11 +300,13 @@ else:
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
                     p_sugerido_limpo = converter_preco(r['SUGERIDO'])
-                    detalhado_rows.append([horario_ref, promotor, loja, city := cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
                 for f in prod_faltantes:
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], "NÃO COMERCIALIZA", 0.0, 0.0])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0])
                 
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, prod_faltantes, obs_text)
+                # Formatar para o PDF passar a coluna de histórico
+                pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, pdf_faltantes_formatado, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, obs_text], detalhado_rows)
                     st.success("Enviado com sucesso!"); st.balloons()
@@ -270,8 +315,9 @@ else:
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
-                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], "MIX ZERO", 0.0, 0.0] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), prod_faltantes, obs_z_mix)
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
+                pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
