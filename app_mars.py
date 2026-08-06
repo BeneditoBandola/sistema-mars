@@ -149,8 +149,8 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                     sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
                 else:
                     sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
-            data_audit.append([row.get('PRODUTO', '')[:30], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
-        t1 = Table(data_audit, colWidths=[190, 80, 80, 110, 55])
+            data_audit.append([row.get('PRODUTO', '')[:35], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
+        t1 = Table(data_audit, colWidths=[195, 75, 75, 110, 50])
         t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
         elementos.append(t1)
     elementos.append(Paragraph("<b>2. ITENS NÃO COMERCIALIZADOS / HISTÓRICO DE OPORTUNIDADE</b>", estilos['Heading3']))
@@ -225,18 +225,30 @@ else:
         
         dados_audit_view, prod_faltantes = [], []
         for c, n in PRODUTOS_FOCAIS.items():
+            # Verificar histórico deste produto específico para esta loja
+            historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
+            
+            # Obter data da última compra se houver histórico
+            ultima_data_str = ""
+            if not historico_item.empty and 'DATA' in historico_item.columns:
+                historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
+                maior_data = historico_item['DATA_DT'].max()
+                if pd.notna(maior_data):
+                    ultima_data_str = f" (Última compra: {maior_data.strftime('%d/%m/%Y')})"
+
+            produto_nome_com_data = f"{n}{ultima_data_str}"
+
             if c in comp_cli:
                 dados_audit_view.append({
-                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": n, 
+                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_com_data, 
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c]
                 if not historico_item.empty:
-                    status_hist = "🔥 JÁ COMPROU ANTES (Oportunidade!)"
+                    status_hist = f"🔥 JÁ COMPROU ANTES{ultima_data_str} (Oportunidade!)"
                 else:
                     status_hist = "Item Novo / Não Comercializa"
-                prod_faltantes.append([c, n, status_hist])
+                prod_faltantes.append([c, produto_nome_com_data, status_hist])
         
         if dados_audit_view:
             df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
@@ -268,7 +280,7 @@ else:
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
 
-        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ (COM RESUMO E ORDEM) ---
+        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ ---
         st.markdown("---")
         st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
         
@@ -278,7 +290,6 @@ else:
         ].copy()
         
         if not vendas_mars_loja.empty:
-            # Calcular resumo do ano
             total_compras = len(vendas_mars_loja)
             soma_qtd = vendas_mars_loja['TOTAL QTD'].sum() if 'TOTAL QTD' in vendas_mars_loja.columns else 0
             
@@ -293,8 +304,6 @@ else:
                 
             tabela_historico = vendas_mars_loja[['DATA_DT', 'DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
             tabela_historico.columns = ['DATA_SORT', 'Data do Pedido', 'Produto Mars', 'Tipo de Operação', 'Qtd']
-            
-            # Ordenar da mais recente para a mais antiga
             tabela_historico = tabela_historico.sort_values(by='DATA_SORT', ascending=False)
             tabela_historico = tabela_historico.drop(columns=['DATA_SORT'])
             
