@@ -110,8 +110,11 @@ def carregar_dados():
         if not os.path.exists(caminho_c): caminho_c = "CLIENTES.xlsx"
         df_c = pd.read_excel(caminho_c)
         df_c.columns = [c.strip().upper() for c in df_c.columns]
+        # Padronizar nome para facilitar o cruzamento
+        if 'NOME' in df_c.columns:
+            df_c['NOME_BUSCA'] = df_c['NOME'].astype(str).str.upper().str.strip()
     except Exception as e:
-        pass # Se falhar, segue sem quebrar o sistema
+        pass
 
     return df_v, df_c
 
@@ -239,26 +242,24 @@ else:
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_l = v_loja.iloc[0]['CIDADE']
         
-        # Identificar código da loja para buscar endereço
-        cod_cliente_atual = v_loja.iloc[0].get('CLIENTE CODIGO', None)
-        
-        # Buscar endereço na planilha CLIENTES.xlsx se disponível
+        # Buscar endereço na planilha CLIENTES.xlsx pelo NOME DA LOJA
         endereco_str = "Endereço não cadastrado"
         bairro_str = ""
         link_maps = ""
         
-        if not df_clientes.empty and cod_cliente_atual is not None:
-            cli_match = df_clientes[df_clientes['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(cod_cliente_atual).replace('.0', '').strip()]
+        if not df_clientes.empty and 'NOME_BUSCA' in df_clientes.columns:
+            loja_busca_limpa = str(loja).upper().strip()
+            cli_match = df_clientes[df_clientes['NOME_BUSCA'] == loja_busca_limpa]
             if not cli_match.empty:
                 end = cli_match.iloc[0].get('ENDEREÇO', '')
                 bai = cli_match.iloc[0].get('BAIRRO', '')
                 uf = cli_match.iloc[0].get('UF', '')
-                if pd.notna(end): endereco_str = str(end)
-                if pd.notna(bai): bairro_str = f" - Bairro: {str(bai)}"
-                if pd.notna(uf): bairro_str += f" ({str(uf)})"
+                if pd.notna(end) and str(end).strip() != "": endereco_str = str(end)
+                if pd.notna(bai) and str(bai).strip() != "": bairro_str = f" - Bairro: {str(bai)}"
+                if pd.notna(uf) and str(uf).strip() != "": bairro_str += f" ({str(uf)})"
                 
                 # Montar link do Google Maps
-                query_maps = f"{loja} {endereco_str} {cisede := cidade_l}".replace(' ', '+')
+                query_maps = f"{loja} {endereco_str} {cidade_l}".replace(' ', '+')
                 link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
 
         # Exibir Cartão de Endereço na Tela
@@ -283,7 +284,7 @@ else:
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                # Inteligência: Verificar se a loja já comprou este item no passado (nas vendas gerais do ano)
+                # Inteligência: Verificar se a loja já comprou este item no passado
                 historico_loja = df_vendas[(df_vendas['CLIENTE NOME'] == loja) & (df_vendas['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c)]
                 if not historico_loja.empty:
                     status_hist = "🔥 JÁ COMPROU ANTES (Oportunidade!)"
@@ -304,7 +305,6 @@ else:
                 for f in prod_faltantes:
                     detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0])
                 
-                # Formatar para o PDF passar a coluna de histórico
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
                 pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, pdf_faltantes_formatado, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
