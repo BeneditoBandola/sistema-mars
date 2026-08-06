@@ -28,7 +28,6 @@ st.markdown("""
     div.stButton > button:hover { background-color: #059669; border-color: #059669; color: white; }
     .stSelectbox label, .stTextArea label { color: #1E3A8A !important; font-weight: bold; }
     h1, h2, h3 { color: #1E3A8A !important; }
-    /* Correção do fundo e cor do texto da caixa de observação */
     textarea { background-color: #FFFFFF !important; color: #1F2937 !important; }
     </style>
 """, unsafe_allow_html=True)
@@ -150,29 +149,24 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
         ]]
         
-        row_colors = []
         for i, row in enumerate(df_audit.to_dict('records')):
-            idx = i + 1
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
             
             if p_loja == 0 or row.get('FALTA NA LOJA?'):
-                sit = "FALTA"
-                row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                sit_html = "<b><font color='red'>FALTA</font></b>"
             else:
                 dif = ((p_loja - p_rec) / p_rec) * 100
                 if p_loja > (p_rec + 0.01):
-                    sit = f"ACIMA (+{dif:.1f}%)"
-                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                    sit_html = f"<b><font color='red'>ACIMA (+{dif:.1f}%)</font></b>"
                 else:
-                    sit = f"CORRETO ({dif:.1f}%)"
-                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+                    sit_html = f"<b><font color='green'>CORRETO ({dif:.1f}%)</font></b>"
             
             data_audit.append([
                 Paragraph(str(row.get('PRODUTO', '')), style_celula),
                 Paragraph(f"R$ {p_rec:.2f}", style_celula),
                 Paragraph(f"R$ {p_loja:.2f}", style_celula),
-                Paragraph(sit, style_celula),
+                Paragraph(sit_html, style_celula),
                 Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
             ])
 
@@ -183,7 +177,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('BOTTOMPADDING', (0,0), (-1,-1), 6),
             ('TOPPADDING', (0,0), (-1,-1), 6),
-        ] + row_colors))
+        ]))
         elementos.append(t1)
 
     elementos.append(Spacer(1, 10))
