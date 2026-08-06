@@ -219,8 +219,6 @@ else:
 
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        
-        # Puxar exatamente a cidade onde este cliente se encontra
         cidade_cliente = str(v_loja.iloc[0]['CIDADE']).strip()
 
         comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
@@ -270,7 +268,7 @@ else:
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
 
-        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ COM DESTAQUE DE COR ---
+        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ (COM RESUMO E ORDEM) ---
         st.markdown("---")
         st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
         
@@ -280,21 +278,32 @@ else:
         ].copy()
         
         if not vendas_mars_loja.empty:
+            # Calcular resumo do ano
+            total_compras = len(vendas_mars_loja)
+            soma_qtd = vendas_mars_loja['TOTAL QTD'].sum() if 'TOTAL QTD' in vendas_mars_loja.columns else 0
+            
+            st.info(f"📊 **Resumo Anual:** {total_compras} registros de pedidos encontrados | **Soma Total de Quantidade Comprada:** {soma_qtd:,.0f} unidades")
+
             if 'DATA' in vendas_mars_loja.columns:
-                vendas_mars_loja['DATA_FORMATADA'] = vendas_mars_loja['DATA'].dt.strftime('%d/%m/%Y')
+                vendas_mars_loja['DATA_DT'] = pd.to_datetime(vendas_mars_loja['DATA'], errors='coerce')
+                vendas_mars_loja['DATA_FORMATADA'] = vendas_mars_loja['DATA_DT'].dt.strftime('%d/%m/%Y')
             else:
+                vendas_mars_loja['DATA_DT'] = pd.NaT
                 vendas_mars_loja['DATA_FORMATADA'] = ""
                 
-            tabela_historico = vendas_mars_loja[['DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
-            tabela_historico.columns = ['Data do Pedido', 'Produto Mars', 'Tipo de Operação', 'Qtd']
-            tabela_historico = tabela_historico.sort_values(by='Data do Pedido', ascending=False)
+            tabela_historico = vendas_mars_loja[['DATA_DT', 'DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
+            tabela_historico.columns = ['DATA_SORT', 'Data do Pedido', 'Produto Mars', 'Tipo de Operação', 'Qtd']
+            
+            # Ordenar da mais recente para a mais antiga
+            tabela_historico = tabela_historico.sort_values(by='DATA_SORT', ascending=False)
+            tabela_historico = tabela_historico.drop(columns=['DATA_SORT'])
             
             def colorir_operacao(val):
                 v = str(val).upper()
                 if "BONIF" in v:
-                    return 'background-color: #FEF3C7; color: #92400E; font-weight: bold;' # Amarelo suave para bonificação
+                    return 'background-color: #FEF3C7; color: #92400E; font-weight: bold;'
                 elif "DEVOL" in v:
-                    return 'background-color: #FEE2E2; color: #991B1B; font-weight: bold;' # Vermelho suave para devolução
+                    return 'background-color: #FEE2E2; color: #991B1B; font-weight: bold;'
                 return ''
 
             st.dataframe(tabela_historico.style.applymap(colorir_operacao, subset=['Tipo de Operação']), use_container_width=True, hide_index=True)
