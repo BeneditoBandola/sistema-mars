@@ -110,9 +110,8 @@ def carregar_dados():
         if not os.path.exists(caminho_c): caminho_c = "CLIENTES.xlsx"
         df_c = pd.read_excel(caminho_c)
         df_c.columns = [c.strip().upper() for c in df_c.columns]
-        # Padronizar nome para facilitar o cruzamento
-        if 'NOME' in df_c.columns:
-            df_c['NOME_BUSCA'] = df_c['NOME'].astype(str).str.upper().str.strip()
+        if 'CÓDIGO' in df_c.columns:
+            df_c['COD_BUSCA'] = df_c['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     except Exception as e:
         pass
 
@@ -242,14 +241,15 @@ else:
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_l = v_loja.iloc[0]['CIDADE']
         
-        # Buscar endereço na planilha CLIENTES.xlsx pelo NOME DA LOJA
+        # Obter código do cliente para buscar endereço exato na planilha CLIENTES.xlsx
+        cod_cliente_atual = str(v_loja.iloc[0].get('CLIENTE CODIGO', '')).replace('.0', '').strip()
+        
         endereco_str = "Endereço não cadastrado"
         bairro_str = ""
         link_maps = ""
         
-        if not df_clientes.empty and 'NOME_BUSCA' in df_clientes.columns:
-            loja_busca_limpa = str(loja).upper().strip()
-            cli_match = df_clientes[df_clientes['NOME_BUSCA'] == loja_busca_limpa]
+        if not df_clientes.empty and 'COD_BUSCA' in df_clientes.columns:
+            cli_match = df_clientes[df_clientes['COD_BUSCA'] == cod_cliente_atual]
             if not cli_match.empty:
                 end = cli_match.iloc[0].get('ENDEREÇO', '')
                 bai = cli_match.iloc[0].get('BAIRRO', '')
