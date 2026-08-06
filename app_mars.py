@@ -103,17 +103,25 @@ def carregar_dados():
     except Exception as e:
         st.error(f"Erro ao carregar vendas: {e}")
 
-    # 2. Clientes (Endereços)
+    # 2. Clientes (Endereços - Mapeamento exato Colunas A, D, E, F)
     df_c = pd.DataFrame()
     try:
         caminho_c = os.path.join(diretorio_atual, "CLIENTES.xlsx")
         if not os.path.exists(caminho_c): caminho_c = "CLIENTES.xlsx"
         df_c = pd.read_excel(caminho_c)
-        df_c.columns = [c.strip().upper() for c in df_c.columns]
-        if 'CÓDIGO' in df_c.columns:
-            df_c['COD_BUSCA'] = df_c['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        if 'NOME' in df_c.columns:
-            df_c['NOME_BUSCA'] = df_c['NOME'].apply(limpar_texto)
+        
+        # Garantir leitura pelas posições exatas ou nomes das colunas
+        # Coluna A = Código, Coluna D = Endereço, Coluna E = Cidade, Coluna F = Bairro
+        cols = df_c.columns
+        if len(cols) >= 6:
+            df_c = df_c.rename(columns={
+                cols[0]: 'COL_COD',
+                cols[3]: 'COL_END',
+                cols[4]: 'COL_CID',
+                cols[5]: 'COL_BAI'
+            })
+            df_c['COD_BUSCA'] = df_c['COL_COD'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            df_c['NOME_BUSCA'] = df_c[cols[1]].apply(limpar_texto) if len(cols) > 1 else ""
     except Exception as e:
         pass
 
@@ -241,42 +249,44 @@ else:
 
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        cidade_l = v_loja.iloc[0]['CIDADE']
+        cidade_vendas = v_loja.iloc[0]['CIDADE']
         
         cod_cliente_atual = str(v_loja.iloc[0].get('CLIENTE CODIGO', '')).replace('.0', '').strip()
         
         endereco_str = "Endereço não cadastrado"
         bairro_str = ""
+        cidade_str = cidade_vendas
         link_maps = ""
         
         if not df_clientes.empty:
             cli_match = pd.DataFrame()
-            # 1. Tentar buscar por Código
+            # 1. Buscar por Código (Coluna A)
             if 'COD_BUSCA' in df_clientes.columns and cod_cliente_atual:
                 cli_match = df_clientes[df_clientes['COD_BUSCA'] == cod_cliente_atual]
             
-            # 2. Se não achar por código, tentar buscar pelo Nome da Loja limpo
+            # 2. Se não achar, buscar pelo Nome
             if cli_match.empty and 'NOME_BUSCA' in df_clientes.columns:
                 loja_limpa = limpar_texto(loja)
                 cli_match = df_clientes[df_clientes['NOME_BUSCA'] == loja_limpa]
             
             if not cli_match.empty:
-                end = cli_match.iloc[0].get('ENDEREÇO', '')
-                bai = cli_match.iloc[0].get('BAIRRO', '')
-                uf = cli_match.iloc[0].get('UF', '')
+                end = cli_match.iloc[0].get('COL_END', '')
+                cid = cli_match.iloc[0].get('COL_CID', '')
+                bai = cli_match.iloc[0].get('COL_BAI', '')
+                
                 if pd.notna(end) and str(end).strip() != "": endereco_str = str(end)
+                if pd.notna(cid) and str(cid).strip() != "": cidade_str = str(cid)
                 if pd.notna(bai) and str(bai).strip() != "": bairro_str = f" - Bairro: {str(bai)}"
-                if pd.notna(uf) and str(uf).strip() != "": bairro_str += f" ({str(uf)})"
 
-        # Montar link do Google Maps garantido
-        query_maps = f"{loja} {endereco_str if endereco_str != 'Endereço não cadastrado' else ''} {cidade_l}".replace(' ', '+')
+        # Montar link do Google Maps
+        query_maps = f"{loja} {endereco_str} {cidade_str}".replace(' ', '+')
         link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
 
-        # Exibir Cartão de Endereço na Tela
+        # Exibir Cartão de Endereço na Tela (Colunas D, E e F mapeadas)
         st.markdown(f"""
             <div class="info-card">
                 <b>📍 Endereço da Loja:</b> {endereco_str}{bairro_str}<br>
-                <b>🏙️ Cidade:</b> {cidade_l}
+                <b>🏙️ Cidade:</b> {cidade_str}
             </div>
         """, unsafe_allow_html=True)
         
@@ -310,23 +320,23 @@ else:
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
                     p_sugerido_limpo = converter_preco(r['SUGERIDO'])
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_str, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
                 for f in prod_faltantes:
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_str, f[0], f[1], f[2], 0.0, 0.0])
                 
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, pdf_faltantes_formatado, obs_text)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_str, df_edit, pdf_faltantes_formatado, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, obs_text], detalhado_rows)
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_str, obs_text], detalhado_rows)
                     st.success("Enviado com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
-                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_str, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_str, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_str, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
