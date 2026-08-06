@@ -21,9 +21,9 @@ st.markdown("""
     <style>
     .stApp { background-color: #F4F6F9; color: #1F2937; }
     div.stButton > button {
-        height: 55px; font-size: 16px; font-weight: bold; border-radius: 8px;
+        height: 55px; font-size: 15px; font-weight: bold; border-radius: 8px;
         border: 2px solid #1E3A8A; color: #FFFFFF; background-color: #1E3A8A;
-        margin-bottom: 10px;
+        margin-bottom: 8px; width: 100%;
     }
     div.stButton > button:hover { background-color: #059669; border-color: #059669; color: white; }
     .stSelectbox label, .stTextArea label { color: #1E3A8A !important; font-weight: bold; }
@@ -112,12 +112,11 @@ PRODUTOS_FOCAIS = {
     "98903": "WHI GATO CAST CARNE 500G", "98902": "WHI GATO CAST CARNE 900G", "98946": "WHI GATOS CAST PEIXE 900G"
 }
 
-# --- ROTAS ---
+# --- ROTAS (Lucivania removida) ---
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
     "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
     "CAROLINA": ["SAO CARLOS", "ARARAQUARA", "MATAO"], 
-    "LUCIVANIA": ["LINS", "MARILIA", "MARÍLIA", "TUPA", "TUPÃ", "VERA CRUZ"],
     "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"], 
     "MADALLA": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"], 
     "FERNANDA": ["JUIZ DE FORA"]
@@ -227,9 +226,14 @@ st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</
 
 if 'user_mars' not in st.session_state:
     st.subheader("Selecione o seu nome:")
-    cols = st.columns(3)
-    for i, nome in enumerate(ROTAS_MARS.keys()):
-        if cols[i % 3].button(nome, use_container_width=True): 
+    
+    # Exibir botões em 2 colunas para otimizar espaço no celular
+    nomes_promotores = list(ROTAS_MARS.keys())
+    col1, col2 = st.columns(2)
+    
+    for i, nome in enumerate(nomes_promotores):
+        col_atual = col1 if i % 2 == 0 else col2
+        if col_atual.button(nome, use_container_width=True): 
             st.session_state.user_mars = nome
             st.rerun()
 else:
@@ -247,7 +251,7 @@ else:
         f_label, arq_precos = "POÇOS DE CALDAS", "MINEIROS PREÇOS MARS COMPLETO.csv"
     elif promotor in ["RODRIGO", "CAROLINA"]:
         f_label, arq_precos = "SÃO JOÃO DA BOA VISTA", "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
-    elif promotor in ["SARUETE", "LUCIVANIA"]:
+    elif promotor in ["SARUETE"]:
         f_label, arq_precos = "SÃO JOSÉ DO RIO PRETO", "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
     elif promotor in ["FERNANDA", "MADALLA"]:
         f_label, arq_precos = "JUIZ DE FORA", "MINEIROS PREÇOS MARS COMPLETO.csv"
@@ -285,8 +289,9 @@ else:
                     ultima_linha = historico_item.loc[idx_mais_recente]
                     dt_ult = ultima_linha['DATA_DT']
                     qtd_ult = ultima_linha.get('TOTAL QTD', 0)
+                    op_ult = str(ultima_linha.get('OPERACAO', 'VENDA')).strip()
                     if pd.notna(dt_ult):
-                        info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y')} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
+                        info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y')} - {op_ult} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
 
             produto_nome_detalhado = f"{n}{info_ultima_compra}"
 
