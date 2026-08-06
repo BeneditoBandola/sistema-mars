@@ -11,7 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # --- CONFIGURAÇÃO VISUAL (CLEAN EXECUTIVO) ---
@@ -128,39 +128,111 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
 
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
+    
+    # Estilo customizado para texto da tabela do PDF com quebra de linha automática
+    style_celula = ParagraphStyle(
+        'EstiloCelula',
+        parent=estilos['Normal'],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor('#1F2937')
+    )
+    style_celula_cabecalho = ParagraphStyle(
+        'EstiloCelulaCab',
+        parent=estilos['Normal'],
+        fontSize=9,
+        leading=11,
+        textColor=colors.white,
+        fontName="Helvetica-Bold"
+    )
+
     dt_pdf = obter_horario_brasil()
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilos['Title']))
     elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
     elementos.append(Paragraph(f"<b>DATA/HORA:</b> {dt_pdf}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
+
     if not df_audit.empty:
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS & OPORTUNIDADES</b>", estilos['Heading3']))
-        data_audit = [["PRODUTO", "REC. MARS", "PREÇO LOJA", "SITUAÇÃO", "FALTA?"]]
+        
+        # Cabeçalhos com parágrafo para formatação limpa
+        data_audit = [[
+            Paragraph("<b>PRODUTO</b>", style_celula_cabecalho),
+            Paragraph("<b>REC. MARS</b>", style_celula_cabecalho),
+            Paragraph("<b>PREÇO LOJA</b>", style_celula_cabecalho),
+            Paragraph("<b>SITUAÇÃO</b>", style_celula_cabecalho),
+            Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
+        ]]
+        
         row_colors = []
         for i, row in enumerate(df_audit.to_dict('records')):
             idx = i + 1
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
+            
             if p_loja == 0 or row.get('FALTA NA LOJA?'):
-                sit = "FALTA"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                sit = "FALTA"
+                row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
             else:
                 dif = ((p_loja - p_rec) / p_rec) * 100
                 if p_loja > (p_rec + 0.01):
-                    sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
+                    sit = f"ACIMA (+{dif:.1f}%)"
+                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
                 else:
-                    sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
-            data_audit.append([row.get('PRODUTO', '')[:40], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
-        t1 = Table(data_audit, colWidths=[200, 75, 75, 105, 45])
-        t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
+                    sit = f"CORRETO ({dif:.1f}%)"
+                    row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
+            
+            # Usando Paragraph nos campos para garantir quebra de linha limpa
+            p_nome = Paragraph(str(row.get('PRODUTO', '')), style_celula)
+            p_sug = Paragraph(f"R$ {p_rec:.2f}", style_celula)
+            p_loj = Paragraph(f"R$ {p_loja:.2f}", style_celula)
+            p_sit = Paragraph(sit, style_celula)
+            p_falta = Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
+
+            data_audit.append([p_nome, p_sug, p_loj, p_sit, p_falta])
+
+        # Larguras ajustadas: Produto com 230 pontos para dar total espaço à data/quantidade
+        t1 = Table(data_audit, colWidths=[230, 65, 65, 95, 45])
+        t1.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+        ] + row_colors))
         elementos.append(t1)
+
+    elementos.append(Spacer(1, 10))
     elementos.append(Paragraph("<b>2. ITENS NÃO COMERCIALIZADOS / HISTÓRICO DE OPORTUNIDADE</b>", estilos['Heading3']))
-    data_f = [["Código", "Produto", "Histórico"]]
-    for f in df_faltantes: data_f.append([f[0], f[1], f[2]])
-    t2 = Table(data_f, colWidths=[70, 265, 170])
-    t2.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+    
+    data_f = [[
+        Paragraph("<b>Código</b>", style_celula_cabecalho),
+        Paragraph("<b>Produto</b>", style_celula_cabecalho),
+        Paragraph("<b>Histórico</b>", style_celula_cabecalho)
+    ]]
+    for f in df_faltantes:
+        data_f.append([
+            Paragraph(str(f[0]), style_celula),
+            Paragraph(str(f[1]), style_celula),
+            Paragraph(str(f[2]), style_celula)
+        ])
+        
+    t2 = Table(data_f, colWidths=[60, 260, 180])
+    t2.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+    ]))
     elementos.append(t2)
-    if feedback: elementos.append(Paragraph(f"<b>OBS:</b> {feedback}", estilos['Normal']))
-    doc.build(elementos); return nome_arquivo
+
+    if feedback: 
+        elementos.append(Spacer(1, 10))
+        elementos.append(Paragraph(f"<b>OBS:</b> {feedback}", estilos['Normal']))
+
+    doc.build(elementos)
+    return nome_arquivo
 
 def enviar_email(assunto, pdf):
     rem, sen, dest = "beneditobandola@gmail.com", "kfih ccqx cskn oito", "benedito.bandola@minassal.com.br"
