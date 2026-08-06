@@ -28,11 +28,6 @@ st.markdown("""
     div.stButton > button:hover { background-color: #059669; border-color: #059669; color: white; }
     .stSelectbox label, .stTextArea label { color: #1E3A8A !important; font-weight: bold; }
     h1, h2, h3 { color: #1E3A8A !important; }
-    .historico-box {
-        background-color: #FFFFFF; padding: 15px; border-radius: 8px;
-        border-left: 5px solid #059669; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        margin-bottom: 15px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -226,30 +221,6 @@ else:
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_l = v_loja.iloc[0]['CIDADE']
 
-        # --- EXIBIR HISTÓRICO DE COMPRAS DA LOJA COM DATAS ---
-        st.markdown("### 📋 Histórico de Compras da Loja (Este Ano)")
-        
-        # Filtrar vendas desta loja específica
-        vendas_loja = df_vendas[df_vendas['CLIENTE NOME'] == loja].copy()
-        
-        if not vendas_loja.empty and 'DATA' in vendas_loja.columns:
-            # Organizar colunas relevantes para o promotor ver
-            cols_exibir = []
-            if 'DATA' in vendas_loja.columns: vendas_loja['DATA_FORMATADA'] = vendas_loja['DATA'].dt.strftime('%d/%m/%Y')
-            
-            # Montar tabela resumida para o promotor consultar
-            tabela_historico = vendas_loja[['DATA_FORMATADA', 'PRODUTO NOME', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
-            tabela_historico.columns = ['Data do Pedido', 'Produto', 'Qtd Comprada']
-            
-            # Ordenar da mais recente para a mais antiga
-            tabela_historico = tabela_historico.sort_values(by='Data do Pedido', ascending=False)
-            
-            st.dataframe(tabela_historico, use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum registro de compra anterior encontrado para esta loja no período.")
-
-        st.markdown("---")
-
         comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
         
         dados_audit_view, prod_faltantes = [], []
@@ -260,7 +231,7 @@ else:
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                historico_item = vendas_loja[vendas_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c]
+                historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c]
                 if not historico_item.empty:
                     status_hist = "🔥 JÁ COMPROU ANTES (Oportunidade!)"
                 else:
@@ -296,3 +267,27 @@ else:
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
+
+        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ ---
+        st.markdown("---")
+        st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
+        
+        # Filtrar apenas fabricante Mars e loja selecionada
+        vendas_mars_loja = df_vendas[
+            (df_vendas['CLIENTE NOME'] == loja) & 
+            (df_vendas['FABRICANTE NOME'].astype(str).str.upper().str.contains("MARS", na=False))
+        ].copy()
+        
+        if not vendas_mars_loja.empty:
+            if 'DATA' in vendas_mars_loja.columns:
+                vendas_mars_loja['DATA_FORMATADA'] = vendas_mars_loja['DATA'].dt.strftime('%d/%m/%Y')
+            else:
+                vendas_mars_loja['DATA_FORMATADA'] = ""
+                
+            tabela_historico = vendas_mars_loja[['DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
+            tabela_historico.columns = ['Data do Pedido', 'Produto Mars', 'Tipo (Venda/Bonificação)', 'Qtd']
+            tabela_historico = tabela_historico.sort_values(by='Data do Pedido', ascending=False)
+            
+            st.dataframe(tabela_historico, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhum registro de compra de produtos Mars encontrado para esta loja no período.")
