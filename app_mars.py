@@ -28,9 +28,9 @@ st.markdown("""
     div.stButton > button:hover { background-color: #059669; border-color: #059669; color: white; }
     .stSelectbox label, .stTextArea label { color: #1E3A8A !important; font-weight: bold; }
     h1, h2, h3 { color: #1E3A8A !important; }
-    .info-card {
+    .historico-box {
         background-color: #FFFFFF; padding: 15px; border-radius: 8px;
-        border-left: 5px solid #1E3A8A; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border-left: 5px solid #059669; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         margin-bottom: 15px;
     }
     </style>
@@ -86,12 +86,10 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
-# --- CARREGAR BASES (VENDAS + CLIENTES) ---
+# --- CARREGAR BASES DE VENDAS ---
 @st.cache_data(ttl=300)
 def carregar_dados():
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
-    
-    # 1. Vendas
     df_v = pd.DataFrame()
     try:
         caminho_v = os.path.join(diretorio_atual, "VENDAS_ATUALIZADAS_2026.zip")
@@ -102,23 +100,7 @@ def carregar_dados():
             df_v['DATA'] = pd.to_datetime(df_v['DATA'], errors='coerce')
     except Exception as e:
         st.error(f"Erro ao carregar vendas: {e}")
-
-    # 2. Clientes (Endereços - Leitura Direta por Nome de Coluna da Planilha CLIENTES.xlsx)
-    df_c = pd.DataFrame()
-    try:
-        caminho_c = os.path.join(diretorio_atual, "CLIENTES.xlsx")
-        if not os.path.exists(caminho_c): caminho_c = "CLIENTES.xlsx"
-        df_c = pd.read_excel(caminho_c)
-        df_c.columns = [str(c).strip().upper() for c in df_c.columns]
-        
-        if 'CÓDIGO' in df_c.columns:
-            df_c['COD_BUSCA'] = df_c['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        if 'NOME' in df_c.columns:
-            df_c['NOME_BUSCA'] = df_c['NOME'].apply(limpar_texto)
-    except Exception as e:
-        pass
-
-    return df_v, df_c
+    return df_v
 
 # --- LISTA MESTRA FOCAL ---
 PRODUTOS_FOCAIS = {
@@ -206,7 +188,7 @@ if 'user_mars' not in st.session_state:
             st.session_state.user_mars = nome
             st.rerun()
 else:
-    df_vendas, df_clientes = carregar_dados()
+    df_vendas = carregar_dados()
     if df_vendas.empty:
         st.error("Aguardando carregamento da base de vendas...")
         if st.button("Voltar"):
@@ -242,50 +224,31 @@ else:
 
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        cidade_vendas = v_loja.iloc[0]['CIDADE']
-        
-        cod_cliente_atual = str(v_loja.iloc[0].get('CLIENTE CODIGO', '')).replace('.0', '').strip()
-        
-        endereco_str = "Endereço não cadastrado"
-        bairro_str = ""
-        cidade_str = cidade_vendas
-        link_maps = ""
-        
-        if not df_clientes.empty:
-            cli_match = pd.DataFrame()
-            # 1. Buscar por Código Exato (Coluna CÓDIGO)
-            if 'COD_BUSCA' in df_clientes.columns and cod_cliente_atual:
-                cli_match = df_clientes[df_clientes['COD_BUSCA'] == cod_cliente_atual]
-            
-            # 2. Se não achar, buscar pelo Nome (Coluna NOME)
-            if cli_match.empty and 'NOME_BUSCA' in df_clientes.columns:
-                loja_limpa = limpar_texto(loja)
-                cli_match = df_clientes[df_clientes['NOME_BUSCA'] == loja_limpa]
-            
-            if not cli_match.empty:
-                end = cli_match.iloc[0].get('ENDEREÇO', '')
-                cid = cli_match.iloc[0].get('CIDADE', '')
-                bai = cli_match.iloc[0].get('BAIRRO', '')
-                
-                if pd.notna(end) and str(end).strip() != "": endereco_str = str(end)
-                if pd.notna(cid) and str(cid).strip() != "": cidade_str = str(cid)
-                if pd.notna(bai) and str(bai).strip() != "": bairro_str = f" - Bairro: {str(bai)}"
+        cidade_l = v_loja.iloc[0]['CIDADE']
 
-        # Montar link do Google Maps
-        query_maps = f"{loja} {endereco_str} {cidade_str}".replace(' ', '+')
-        link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
-
-        # Exibir Cartão de Endereço na Tela
-        st.markdown(f"""
-            <div class="info-card">
-                <b>📍 Endereço da Loja:</b> {endereco_str}{bairro_str}<br>
-                <b>🏙️ Cidade:</b> {cidade_str}
-            </div>
-        """, unsafe_allow_html=True)
+        # --- EXIBIR HISTÓRICO DE COMPRAS DA LOJA COM DATAS ---
+        st.markdown("### 📋 Histórico de Compras da Loja (Este Ano)")
         
-        if link_maps:
-            st.markdown(f"[📍 Abrir Rota no Google Maps / Waze]({link_maps})", unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
+        # Filtrar vendas desta loja específica
+        vendas_loja = df_vendas[df_vendas['CLIENTE NOME'] == loja].copy()
+        
+        if not vendas_loja.empty and 'DATA' in vendas_loja.columns:
+            # Organizar colunas relevantes para o promotor ver
+            cols_exibir = []
+            if 'DATA' in vendas_loja.columns: vendas_loja['DATA_FORMATADA'] = vendas_loja['DATA'].dt.strftime('%d/%m/%Y')
+            
+            # Montar tabela resumida para o promotor consultar
+            tabela_historico = vendas_loja[['DATA_FORMATADA', 'PRODUTO NOME', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
+            tabela_historico.columns = ['Data do Pedido', 'Produto', 'Qtd Comprada']
+            
+            # Ordenar da mais recente para a mais antiga
+            tabela_historico = tabela_historico.sort_values(by='Data do Pedido', ascending=False)
+            
+            st.dataframe(tabela_historico, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhum registro de compra anterior encontrado para esta loja no período.")
+
+        st.markdown("---")
 
         comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
         
@@ -297,8 +260,8 @@ else:
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                historico_loja = df_vendas[(df_vendas['CLIENTE NOME'] == loja) & (df_vendas['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c)]
-                if not historico_loja.empty:
+                historico_item = vendas_loja[vendas_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c]
+                if not historico_item.empty:
                     status_hist = "🔥 JÁ COMPROU ANTES (Oportunidade!)"
                 else:
                     status_hist = "Item Novo / Não Comercializa"
@@ -313,23 +276,23 @@ else:
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
                     p_sugerido_limpo = converter_preco(r['SUGERIDO'])
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_str, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
                 for f in prod_faltantes:
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_str, f[0], f[1], f[2], 0.0, 0.0])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0])
                 
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_str, df_edit, pdf_faltantes_formatado, obs_text)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, pdf_faltantes_formatado, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_str, obs_text], detalhado_rows)
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, obs_text], detalhado_rows)
                     st.success("Enviado com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
-                detalhado_rows = [[horario_ref, promotor, loja, cidade_str, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_str, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_str, "MIX ZERO: "+obs_z_mix], detalhado_rows)
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
