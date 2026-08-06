@@ -112,6 +112,8 @@ def carregar_dados():
         df_c.columns = [c.strip().upper() for c in df_c.columns]
         if 'CÓDIGO' in df_c.columns:
             df_c['COD_BUSCA'] = df_c['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        if 'NOME' in df_c.columns:
+            df_c['NOME_BUSCA'] = df_c['NOME'].apply(limpar_texto)
     except Exception as e:
         pass
 
@@ -241,15 +243,23 @@ else:
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_l = v_loja.iloc[0]['CIDADE']
         
-        # Obter código do cliente para buscar endereço exato na planilha CLIENTES.xlsx
         cod_cliente_atual = str(v_loja.iloc[0].get('CLIENTE CODIGO', '')).replace('.0', '').strip()
         
         endereco_str = "Endereço não cadastrado"
         bairro_str = ""
         link_maps = ""
         
-        if not df_clientes.empty and 'COD_BUSCA' in df_clientes.columns:
-            cli_match = df_clientes[df_clientes['COD_BUSCA'] == cod_cliente_atual]
+        if not df_clientes.empty:
+            cli_match = pd.DataFrame()
+            # 1. Tentar buscar por Código
+            if 'COD_BUSCA' in df_clientes.columns and cod_cliente_atual:
+                cli_match = df_clientes[df_clientes['COD_BUSCA'] == cod_cliente_atual]
+            
+            # 2. Se não achar por código, tentar buscar pelo Nome da Loja limpo
+            if cli_match.empty and 'NOME_BUSCA' in df_clientes.columns:
+                loja_limpa = limpar_texto(loja)
+                cli_match = df_clientes[df_clientes['NOME_BUSCA'] == loja_limpa]
+            
             if not cli_match.empty:
                 end = cli_match.iloc[0].get('ENDEREÇO', '')
                 bai = cli_match.iloc[0].get('BAIRRO', '')
@@ -257,10 +267,10 @@ else:
                 if pd.notna(end) and str(end).strip() != "": endereco_str = str(end)
                 if pd.notna(bai) and str(bai).strip() != "": bairro_str = f" - Bairro: {str(bai)}"
                 if pd.notna(uf) and str(uf).strip() != "": bairro_str += f" ({str(uf)})"
-                
-                # Montar link do Google Maps
-                query_maps = f"{loja} {endereco_str} {cidade_l}".replace(' ', '+')
-                link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
+
+        # Montar link do Google Maps garantido
+        query_maps = f"{loja} {endereco_str if endereco_str != 'Endereço não cadastrado' else ''} {cidade_l}".replace(' ', '+')
+        link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
 
         # Exibir Cartão de Endereço na Tela
         st.markdown(f"""
@@ -284,7 +294,6 @@ else:
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                # Inteligência: Verificar se a loja já comprou este item no passado
                 historico_loja = df_vendas[(df_vendas['CLIENTE NOME'] == loja) & (df_vendas['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c)]
                 if not historico_loja.empty:
                     status_hist = "🔥 JÁ COMPROU ANTES (Oportunidade!)"
