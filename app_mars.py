@@ -4,7 +4,7 @@ import os
 import unicodedata
 import smtplib
 import gspread
-import re  # ADICIONADO PARA CORREÇÃO CHICOTE
+import re
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -98,7 +98,7 @@ PRODUTOS_FOCAIS = {
     "98903": "WHI GATO CAST CARNE 500G", "98902": "WHI GATO CAST CARNE 900G", "98946": "WHI GATOS CAST PEIXE 900G"
 }
 
-# --- ATUALIZAÇÃO DE ROTAS (LUCIVANIA E MADALLA) ---
+# --- ATUALIZAÇÃO DE ROTAS ---
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
     "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
@@ -113,28 +113,31 @@ ROTAS_MARS = {
 def carregar_vendas():
     try:
         diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
-        arquivos = [f for f in os.listdir(diretorio_atual) if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
-        if not arquivos:
-            arquivos = [f for f in os.listdir(".") if f.upper().startswith("VENDAS") and f.lower().endswith(".csv")]
-            diretorio_atual = "."
-        if not arquivos:
-            st.error(f"Arquivo de vendas não encontrado! Verifique se ele está no GitHub.")
-            return pd.DataFrame()
-        caminho_final = os.path.join(diretorio_atual, arquivos[0])
-        df = pd.read_csv(caminho_final, sep=None, engine='python', encoding='utf-8-sig')
+        nome_arquivo = "VENDAS_ATUALIZADAS_2026.zip" 
+        caminho_final = os.path.join(diretorio_atual, nome_arquivo)
+        
+        if not os.path.exists(caminho_final):
+            caminho_final = nome_arquivo
+            if not os.path.exists(caminho_final):
+                st.error(f"🚨 Arquivo '{nome_arquivo}' não encontrado! Verifique se ele está no GitHub.")
+                return pd.DataFrame()
+
+        df = pd.read_csv(caminho_final, sep=';', encoding='utf-8-sig', compression='zip')
+        
         df.columns = [c.strip().upper() for c in df.columns]
+        
         if 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
+            
         return df
+        
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+        st.error(f"Erro ao carregar a planilha de vendas: {e}")
         return pd.DataFrame()
 
 def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
-    # --- AJUSTE CHICOTE: Limpeza do nome do arquivo para evitar erro FileNotFoundError ---
     loja_limpa = re.sub(r'[^\w\s-]', '', loja).strip().replace(' ', '_')
     nome_arquivo = f"Oportunidades_{loja_limpa}.pdf"
-    # -----------------------------------------------------------------------------------
 
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
