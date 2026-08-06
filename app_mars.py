@@ -103,25 +103,18 @@ def carregar_dados():
     except Exception as e:
         st.error(f"Erro ao carregar vendas: {e}")
 
-    # 2. Clientes (Endereços - Mapeamento exato Colunas A, D, E, F)
+    # 2. Clientes (Endereços - Leitura Direta por Nome de Coluna da Planilha CLIENTES.xlsx)
     df_c = pd.DataFrame()
     try:
         caminho_c = os.path.join(diretorio_atual, "CLIENTES.xlsx")
         if not os.path.exists(caminho_c): caminho_c = "CLIENTES.xlsx"
         df_c = pd.read_excel(caminho_c)
+        df_c.columns = [str(c).strip().upper() for c in df_c.columns]
         
-        # Garantir leitura pelas posições exatas ou nomes das colunas
-        # Coluna A = Código, Coluna D = Endereço, Coluna E = Cidade, Coluna F = Bairro
-        cols = df_c.columns
-        if len(cols) >= 6:
-            df_c = df_c.rename(columns={
-                cols[0]: 'COL_COD',
-                cols[3]: 'COL_END',
-                cols[4]: 'COL_CID',
-                cols[5]: 'COL_BAI'
-            })
-            df_c['COD_BUSCA'] = df_c['COL_COD'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            df_c['NOME_BUSCA'] = df_c[cols[1]].apply(limpar_texto) if len(cols) > 1 else ""
+        if 'CÓDIGO' in df_c.columns:
+            df_c['COD_BUSCA'] = df_c['CÓDIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        if 'NOME' in df_c.columns:
+            df_c['NOME_BUSCA'] = df_c['NOME'].apply(limpar_texto)
     except Exception as e:
         pass
 
@@ -260,19 +253,19 @@ else:
         
         if not df_clientes.empty:
             cli_match = pd.DataFrame()
-            # 1. Buscar por Código (Coluna A)
+            # 1. Buscar por Código Exato (Coluna CÓDIGO)
             if 'COD_BUSCA' in df_clientes.columns and cod_cliente_atual:
                 cli_match = df_clientes[df_clientes['COD_BUSCA'] == cod_cliente_atual]
             
-            # 2. Se não achar, buscar pelo Nome
+            # 2. Se não achar, buscar pelo Nome (Coluna NOME)
             if cli_match.empty and 'NOME_BUSCA' in df_clientes.columns:
                 loja_limpa = limpar_texto(loja)
                 cli_match = df_clientes[df_clientes['NOME_BUSCA'] == loja_limpa]
             
             if not cli_match.empty:
-                end = cli_match.iloc[0].get('COL_END', '')
-                cid = cli_match.iloc[0].get('COL_CID', '')
-                bai = cli_match.iloc[0].get('COL_BAI', '')
+                end = cli_match.iloc[0].get('ENDEREÇO', '')
+                cid = cli_match.iloc[0].get('CIDADE', '')
+                bai = cli_match.iloc[0].get('BAIRRO', '')
                 
                 if pd.notna(end) and str(end).strip() != "": endereco_str = str(end)
                 if pd.notna(cid) and str(cid).strip() != "": cidade_str = str(cid)
@@ -282,7 +275,7 @@ else:
         query_maps = f"{loja} {endereco_str} {cidade_str}".replace(' ', '+')
         link_maps = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
 
-        # Exibir Cartão de Endereço na Tela (Colunas D, E e F mapeadas)
+        # Exibir Cartão de Endereço na Tela
         st.markdown(f"""
             <div class="info-card">
                 <b>📍 Endereço da Loja:</b> {endereco_str}{bairro_str}<br>
