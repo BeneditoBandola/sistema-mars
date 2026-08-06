@@ -235,7 +235,9 @@ else:
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
         cidade_l = v_loja.iloc[0]['CIDADE']
-        comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).unique())
+        
+        # AQUI ESTÁ A CORREÇÃO QUE REMOVE O '.0' E IMPEDE O MIX ZERO:
+        comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
         
         dados_audit_view, prod_faltantes = [], []
         for c, n in PRODUTOS_FOCAIS.items():
