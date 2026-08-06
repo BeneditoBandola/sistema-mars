@@ -28,6 +28,8 @@ st.markdown("""
     div.stButton > button:hover { background-color: #059669; border-color: #059669; color: white; }
     .stSelectbox label, .stTextArea label { color: #1E3A8A !important; font-weight: bold; }
     h1, h2, h3 { color: #1E3A8A !important; }
+    /* Correção do fundo e cor do texto da caixa de observação */
+    textarea { background-color: #FFFFFF !important; color: #1F2937 !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -129,22 +131,8 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
     
-    # Estilo customizado para texto da tabela do PDF com quebra de linha automática
-    style_celula = ParagraphStyle(
-        'EstiloCelula',
-        parent=estilos['Normal'],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor('#1F2937')
-    )
-    style_celula_cabecalho = ParagraphStyle(
-        'EstiloCelulaCab',
-        parent=estilos['Normal'],
-        fontSize=9,
-        leading=11,
-        textColor=colors.white,
-        fontName="Helvetica-Bold"
-    )
+    style_celula = ParagraphStyle('EstiloCelula', parent=estilos['Normal'], fontSize=8, leading=10, textColor=colors.HexColor('#1F2937'))
+    style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.white, fontName="Helvetica-Bold")
 
     dt_pdf = obter_horario_brasil()
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilos['Title']))
@@ -154,8 +142,6 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
 
     if not df_audit.empty:
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS & OPORTUNIDADES</b>", estilos['Heading3']))
-        
-        # Cabeçalhos com parágrafo para formatação limpa
         data_audit = [[
             Paragraph("<b>PRODUTO</b>", style_celula_cabecalho),
             Paragraph("<b>REC. MARS</b>", style_celula_cabecalho),
@@ -182,16 +168,14 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                     sit = f"CORRETO ({dif:.1f}%)"
                     row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
             
-            # Usando Paragraph nos campos para garantir quebra de linha limpa
-            p_nome = Paragraph(str(row.get('PRODUTO', '')), style_celula)
-            p_sug = Paragraph(f"R$ {p_rec:.2f}", style_celula)
-            p_loj = Paragraph(f"R$ {p_loja:.2f}", style_celula)
-            p_sit = Paragraph(sit, style_celula)
-            p_falta = Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
+            data_audit.append([
+                Paragraph(str(row.get('PRODUTO', '')), style_celula),
+                Paragraph(f"R$ {p_rec:.2f}", style_celula),
+                Paragraph(f"R$ {p_loja:.2f}", style_celula),
+                Paragraph(sit, style_celula),
+                Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
+            ])
 
-            data_audit.append([p_nome, p_sug, p_loj, p_sit, p_falta])
-
-        # Larguras ajustadas: Produto com 230 pontos para dar total espaço à data/quantidade
         t1 = Table(data_audit, colWidths=[230, 65, 65, 95, 45])
         t1.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
@@ -203,7 +187,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(t1)
 
     elementos.append(Spacer(1, 10))
-    elementos.append(Paragraph("<b>2. ITENS NÃO COMERCIALIZADOS / HISTÓRICO DE OPORTUNIDADE</b>", estilos['Heading3']))
+    elementos.append(Paragraph("<b>2. PRODUTO NÃO ENCONTRADO NA LOJA / HISTÓRICO</b>", estilos['Heading3']))
     
     data_f = [[
         Paragraph("<b>Código</b>", style_celula_cabecalho),
@@ -318,7 +302,10 @@ else:
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
-                status_hist = f"🔥 JÁ COMPROU ANTES{info_ultima_compra} (Oportunidade!)" if not historico_item.empty else "Item Novo / Não Comercializa"
+                if not historico_item.empty:
+                    status_hist = f"PRODUTO NÃO ENCONTRADO NA LOJA{info_ultima_compra}"
+                else:
+                    status_hist = "PRODUTO NÃO ENCONTRADO NA LOJA (NÃO COMPRADO ESTE ANO)"
                 prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
