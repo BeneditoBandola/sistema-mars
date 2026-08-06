@@ -219,7 +219,9 @@ else:
 
     if loja != "-- Selecione --":
         v_loja = df_f[df_f['CLIENTE NOME'] == loja]
-        cidade_l = v_loja.iloc[0]['CIDADE']
+        
+        # Puxar exatamente a cidade onde este cliente se encontra
+        cidade_cliente = str(v_loja.iloc[0]['CIDADE']).strip()
 
         comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
         
@@ -247,32 +249,31 @@ else:
                 for r in df_edit.to_dict('records'):
                     status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
                     p_sugerido_limpo = converter_preco(r['SUGERIDO'])
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
                 for f in prod_faltantes:
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0])
+                    detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
                 
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, df_edit, pdf_faltantes_formatado, obs_text)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, pdf_faltantes_formatado, obs_text)
                 if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, obs_text], detalhado_rows)
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
                     st.success("Enviado com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
             if st.button("🚨 ENVIAR MIX ZERO"):
                 horario_ref = obter_horario_brasil()
-                detalhado_rows = [[horario_ref, promotor, loja, cidade_l, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
+                detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
                 pdf_faltantes_formatado = [[f[0], f[1]] for f in prod_faltantes]
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_l, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
+                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), pdf_faltantes_formatado, obs_z_mix)
                 if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_l, "MIX ZERO: "+obs_z_mix], detalhado_rows)
+                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                     st.success("Mix Zero registrado com sucesso!"); st.balloons()
 
-        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ ---
+        # --- HISTÓRICO DE COMPRAS DA MARS NO RODAPÉ COM DESTAQUE DE COR ---
         st.markdown("---")
         st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
         
-        # Filtrar apenas fabricante Mars e loja selecionada
         vendas_mars_loja = df_vendas[
             (df_vendas['CLIENTE NOME'] == loja) & 
             (df_vendas['FABRICANTE NOME'].astype(str).str.upper().str.contains("MARS", na=False))
@@ -285,9 +286,17 @@ else:
                 vendas_mars_loja['DATA_FORMATADA'] = ""
                 
             tabela_historico = vendas_mars_loja[['DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
-            tabela_historico.columns = ['Data do Pedido', 'Produto Mars', 'Tipo (Venda/Bonificação)', 'Qtd']
+            tabela_historico.columns = ['Data do Pedido', 'Produto Mars', 'Tipo de Operação', 'Qtd']
             tabela_historico = tabela_historico.sort_values(by='Data do Pedido', ascending=False)
             
-            st.dataframe(tabela_historico, use_container_width=True, hide_index=True)
+            def colorir_operacao(val):
+                v = str(val).upper()
+                if "BONIF" in v:
+                    return 'background-color: #FEF3C7; color: #92400E; font-weight: bold;' # Amarelo suave para bonificação
+                elif "DEVOL" in v:
+                    return 'background-color: #FEE2E2; color: #991B1B; font-weight: bold;' # Vermelho suave para devolução
+                return ''
+
+            st.dataframe(tabela_historico.style.applymap(colorir_operacao, subset=['Tipo de Operação']), use_container_width=True, hide_index=True)
         else:
             st.info("Nenhum registro de compra de produtos Mars encontrado para esta loja no período.")
