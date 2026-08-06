@@ -102,7 +102,7 @@ PRODUTOS_FOCAIS = {
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
     "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
-    "TIAGO": ["SAO CARLOS", "ARARAQUARA", "MATAO"], 
+    "CAROLINA": ["SAO CARLOS", "ARARAQUARA", "MATAO"], 
     "LUCIVANIA": ["LINS", "MARILIA", "MARÍLIA", "TUPA", "TUPÃ", "VERA CRUZ"],
     "SARUETE": ["SAO JOSE DO RIO PRETO", "MIRASSOL", "CATANDUVA"], 
     "MADALLA": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"], 
@@ -207,10 +207,10 @@ else:
     
     if promotor == "PAMELA":
         f_label, arq_precos = "POÇOS DE CALDAS", "MINEIROS PREÇOS MARS COMPLETO.csv"
-    elif promotor in ["RODRIGO", "TIAGO"]:
-        f_label, arq_precos = "SÃO JOÃO DA BOA VISTA", "PAULISTINHAS MARS PREÇO.csv"
+    elif promotor in ["RODRIGO", "CAROLINA"]:
+        f_label, arq_precos = "SÃO JOÃO DA BOA VISTA", "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
     elif promotor in ["SARUETE", "LUCIVANIA"]:
-        f_label, arq_precos = "SÃO JOSÉ DO RIO PRETO", "PAULISTINHAS MARS PREÇO.csv"
+        f_label, arq_precos = "SÃO JOSÉ DO RIO PRETO", "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
     elif promotor in ["FERNANDA", "MADALLA"]:
         f_label, arq_precos = "JUIZ DE FORA", "MINEIROS PREÇOS MARS COMPLETO.csv"
     else:
