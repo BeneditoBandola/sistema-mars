@@ -149,8 +149,8 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                     sit = f"ACIMA (+{dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.red))
                 else:
                     sit = f"CORRETO ({dif:.1f}%)"; row_colors.append(('TEXTCOLOR', (3, idx), (3, idx), colors.green))
-            data_audit.append([row.get('PRODUTO', '')[:35], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
-        t1 = Table(data_audit, colWidths=[195, 75, 75, 110, 50])
+            data_audit.append([row.get('PRODUTO', '')[:40], f"R$ {p_rec:.2f}", f"R$ {p_loja:.2f}", sit, "SIM" if row.get('FALTA NA LOJA?') else "NÃO"])
+        t1 = Table(data_audit, colWidths=[200, 75, 75, 105, 45])
         t1.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)] + row_colors))
         elementos.append(t1)
     elementos.append(Paragraph("<b>2. ITENS NÃO COMERCIALIZADOS / HISTÓRICO DE OPORTUNIDADE</b>", estilos['Heading3']))
@@ -225,30 +225,34 @@ else:
         
         dados_audit_view, prod_faltantes = [], []
         for c, n in PRODUTOS_FOCAIS.items():
-            # Verificar histórico deste produto específico para esta loja
             historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
             
-            # Obter data da última compra se houver histórico
-            ultima_data_str = ""
+            # Obter data e quantidade da última compra
+            info_ultima_compra = ""
             if not historico_item.empty and 'DATA' in historico_item.columns:
                 historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
-                maior_data = historico_item['DATA_DT'].max()
-                if pd.notna(maior_data):
-                    ultima_data_str = f" (Última compra: {maior_data.strftime('%d/%m/%Y')})"
+                # Encontrar a linha da data mais recente
+                idx_mais_recente = historico_item['DATA_DT'].idxmax()
+                if pd.notna(idx_mais_recente):
+                    ultima_linha = historico_item.loc[idx_mais_recente]
+                    dt_ult = ultima_linha['DATA_DT']
+                    qtd_ult = ultima_linha.get('TOTAL QTD', 0)
+                    if pd.notna(dt_ult):
+                        info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y')} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
 
-            produto_nome_com_data = f"{n}{ultima_data_str}"
+            produto_nome_detalhado = f"{n}{info_ultima_compra}"
 
             if c in comp_cli:
                 dados_audit_view.append({
-                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_com_data, 
+                    "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
                 if not historico_item.empty:
-                    status_hist = f"🔥 JÁ COMPROU ANTES{ultima_data_str} (Oportunidade!)"
+                    status_hist = f"🔥 JÁ COMPROU ANTES{info_ultima_compra} (Oportunidade!)"
                 else:
                     status_hist = "Item Novo / Não Comercializa"
-                prod_faltantes.append([c, produto_nome_com_data, status_hist])
+                prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
             df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
