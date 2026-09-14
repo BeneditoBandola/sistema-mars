@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # --- CONFIGURAÇÃO VISUAL (CLEAN EXECUTIVO) ---
-st.set_page_config(page_title="MARS - Torre de Controle", page_icon="🐾", layout="wide")
+st.set_page_config(page_title="MARS - Torre de Controle com Markup", page_icon="🐾", layout="wide")
 
 st.markdown("""
     <style>
@@ -82,20 +82,23 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
-# --- CARREGAR BASES DE VENDAS ---
+# --- CARREGAR BASE DE VENDAS (NOVO CUBO EXCEL) ---
 @st.cache_data(ttl=300)
 def carregar_dados():
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     df_v = pd.DataFrame()
+    caminho_excel = os.path.join(diretorio_atual, "cubo_de_vendas_14_09_2026_17_22_33.xlsx")
+    if not os.path.exists(caminho_excel):
+        caminho_excel = "cubo_de_vendas_14_09_2026_17_22_33.xlsx"
+    
     try:
-        caminho_v = os.path.join(diretorio_atual, "VENDAS_ATUALIZADAS_2026.zip")
-        if not os.path.exists(caminho_v): caminho_v = "VENDAS_ATUALIZADAS_2026.zip"
-        df_v = pd.read_csv(caminho_v, sep=';', encoding='utf-8-sig', compression='zip')
-        df_v.columns = [c.strip().upper() for c in df_v.columns]
-        if 'DATA' in df_v.columns:
-            df_v['DATA'] = pd.to_datetime(df_v['DATA'], errors='coerce')
+        if os.path.exists(caminho_excel):
+            df_v = pd.read_excel(caminho_excel, sheet_name=0)
+            df_v.columns = [c.strip().upper() for c in df_v.columns]
+            if 'DATA' in df_v.columns:
+                df_v['DATA'] = pd.to_datetime(df_v['DATA'], errors='coerce')
     except Exception as e:
-        st.error(f"Erro ao carregar vendas: {e}")
+        st.error(f"Erro ao carregar cubo de vendas: {e}")
     return df_v
 
 # --- LISTA MESTRA FOCAL ---
@@ -112,7 +115,6 @@ PRODUTOS_FOCAIS = {
     "98903": "WHI GATO CAST CARNE 500G", "98902": "WHI GATO CAST CARNE 900G", "98946": "WHI GATOS CAST PEIXE 900G"
 }
 
-# --- ROTAS (Lucivania removida) ---
 ROTAS_MARS = {
     "PAMELA": ["POCOS DE CALDAS", "ANDRADAS", "GUAXUPE", "VARGINHA", "TRES CORACOES", "TRES PONTAS", "ITAJUBA", "ALFENAS", "POUSO ALEGRE"],
     "RODRIGO": ["RIBEIRAO PRETO", "SERTÃOZINHO"], 
@@ -133,49 +135,61 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.white, fontName="Helvetica-Bold")
 
     dt_pdf = obter_horario_brasil()
-    elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES MARS</b>", estilos['Title']))
+    elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES E MARKUP MARS</b>", estilos['Title']))
     elementos.append(Paragraph(f"<b>LOJA:</b> {loja} | <b>CIDADE:</b> {cidade} | <b>PROMOTOR:</b> {promotor}", estilos['Normal']))
     elementos.append(Paragraph(f"<b>DATA/HORA:</b> {dt_pdf}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
 
     if not df_audit.empty:
-        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS & OPORTUNIDADES</b>", estilos['Heading3']))
+        elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS, FALTA E MARKUP</b>", estilos['Heading3']))
         data_audit = [[
             Paragraph("<b>PRODUTO</b>", style_celula_cabecalho),
-            Paragraph("<b>REC. MARS</b>", style_celula_cabecalho),
-            Paragraph("<b>PREÇO LOJA</b>", style_celula_cabecalho),
-            Paragraph("<b>SITUAÇÃO</b>", style_celula_cabecalho),
+            Paragraph("<b>REC.</b>", style_celula_cabecalho),
+            Paragraph("<b>P. CUSTO</b>", style_celula_cabecalho),
+            Paragraph("<b>P. GÔNDOLA</b>", style_celula_cabecalho),
+            Paragraph("<b>MARKUP PRAT. / RECOM.</b>", style_celula_cabecalho),
             Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
         ]]
         
         for i, row in enumerate(df_audit.to_dict('records')):
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
+            p_custo_medio = float(row.get('PREÇO PAGO MÉDIO', 0.0))
             
+            # Markup calculado com base no preço médio pago pelo cliente no cubo de vendas
+            if p_custo_medio > 0:
+                markup_praticado = ((p_loja - p_custo_medio) / p_custo_medio) * 100
+            else:
+                markup_praticado = 0.0
+
+            if p_rec > 0:
+                markup_recomendado = ((p_rec - p_custo_medio) / p_custo_medio) * 100 if p_custo_medio > 0 else 0.0
+            else:
+                markup_recomendado = 0.0
+
             if p_loja == 0 or row.get('FALTA NA LOJA?'):
                 sit_html = "<b><font color='red'>FALTA</font></b>"
+            elif p_custo_medio > 0 and markup_praticado > (markup_recomendado * 1.25): # Exagero se 25% acima do recom.
+                sit_html = f"<b><font color='#991B1B'>EXAGERO (+{markup_praticado:.0f}%)</font></b>"
             else:
-                dif = ((p_loja - p_rec) / p_rec) * 100
-                if p_loja > (p_rec + 0.01):
-                    sit_html = f"<b><font color='red'>ACIMA (+{dif:.1f}%)</font></b>"
-                else:
-                    sit_html = f"<b><font color='green'>CORRETO ({dif:.1f}%)</font></b>"
+                sit_html = f"<b><font color='green'>OK ({markup_praticado:.0f}%)</font></b>"
             
             data_audit.append([
                 Paragraph(str(row.get('PRODUTO', '')), style_celula),
                 Paragraph(f"R$ {p_rec:.2f}", style_celula),
+                Paragraph(f"R$ {p_custo_medio:.2f}", style_celula),
                 Paragraph(f"R$ {p_loja:.2f}", style_celula),
                 Paragraph(sit_html, style_celula),
                 Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
             ])
 
-        t1 = Table(data_audit, colWidths=[230, 65, 65, 95, 45])
+        t1 = Table(data_audit, colWidths=[175, 50, 55, 60, 115, 45])
         t1.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
         ]))
         elementos.append(t1)
 
@@ -222,12 +236,10 @@ def enviar_email(assunto, pdf):
     except: return False
 
 # --- INTERFACE PRINCIPAL ---
-st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES MARS</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES & MARKUP MARS</h1>", unsafe_allow_html=True)
 
 if 'user_mars' not in st.session_state:
     st.subheader("Selecione o seu nome:")
-    
-    # Exibir botões em 2 colunas para otimizar espaço no celular
     nomes_promotores = list(ROTAS_MARS.keys())
     col1, col2 = st.columns(2)
     
@@ -239,7 +251,7 @@ if 'user_mars' not in st.session_state:
 else:
     df_vendas = carregar_dados()
     if df_vendas.empty:
-        st.error("Aguardando carregamento da base de vendas...")
+        st.error("Aguardando carregamento da base do cubo de vendas...")
         if st.button("Voltar"):
             del st.session_state.user_mars
             st.rerun()
@@ -281,6 +293,14 @@ else:
         for c, n in PRODUTOS_FOCAIS.items():
             historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
             
+            # Cálculo do Preço Médio Pago pelo Cliente neste produto usando o Cubo de Vendas
+            preco_medio_pago = 0.0
+            if not historico_item.empty:
+                total_v_item = historico_item['TOTAL VALOR'].sum() if 'TOTAL VALOR' in historico_item.columns else 0.0
+                total_q_item = historico_item['TOTAL QTD'].sum() if 'TOTAL QTD' in historico_item.columns else 0.0
+                if total_q_item > 0:
+                    preco_medio_pago = total_v_item / total_q_item
+
             info_ultima_compra = ""
             if not historico_item.empty and 'DATA' in historico_item.columns:
                 historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
@@ -298,6 +318,7 @@ else:
             if c in comp_cli:
                 dados_audit_view.append({
                     "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
+                    "PREÇO PAGO MÉDIO": round(preco_medio_pago, 2),
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
@@ -308,7 +329,7 @@ else:
                 prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
-            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
+            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "PREÇO PAGO MÉDIO", "SUGERIDO"])
             obs_text = st.text_area("🗣️ Observações:")
             if st.button("🚀 ENVIAR RELATÓRIO"):
                 horario_ref = obter_horario_brasil()
@@ -321,7 +342,7 @@ else:
                     detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
                 
                 pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
-                if enviar_email(f"🐾 OPORTUNIDADE: {loja}", pdf_file):
+                if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file):
                     salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
                     st.success("Enviado com sucesso!"); st.balloons()
         else:
