@@ -452,6 +452,6 @@ else:
                     return 'background-color: #FEE2E2; color: #991B1B; font-weight: bold;'
                 return ''
 
-            st.dataframe(tabela_historico.style.applymap(colorir_operacao, subset=['Tipo de Operação']), use_container_width=True, hide_index=True)
+            st.dataframe(tabela_historico.style.map(colorir_operacao, subset=['Tipo de Operação']), use_container_width=True, hide_index=True)
         else:
             st.info("Nenhum registro de compra de produtos Mars encontrado para esta loja no período.")
