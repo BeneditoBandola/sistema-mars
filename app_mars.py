@@ -87,9 +87,9 @@ def salvar_nas_planilhas(resumo, detalhado):
 def carregar_dados():
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     df_v = pd.DataFrame()
-    caminho_excel = os.path.join(diretorio_atual, "cubo_de_vendas_14_09_2026_17_22_33.xlsx")
+    caminho_excel = os.path.join(diretorio_atual, "vendas somente mars de 2026 ate 15 de setembro.xlsx")
     if not os.path.exists(caminho_excel):
-        caminho_excel = "cubo_de_vendas_14_09_2026_17_22_33.xlsx"
+        caminho_excel = "vendas somente mars de 2026 ate 15 de setembro.xlsx"
     
     try:
         if os.path.exists(caminho_excel):
@@ -144,46 +144,52 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS, FALTA E MARKUP</b>", estilos['Heading3']))
         data_audit = [[
             Paragraph("<b>PRODUTO</b>", style_celula_cabecalho),
-            Paragraph("<b>REC.</b>", style_celula_cabecalho),
-            Paragraph("<b>P. CUSTO</b>", style_celula_cabecalho),
+            Paragraph("<b>P. RECOMENDADO</b>", style_celula_cabecalho),
+            Paragraph("<b>P. PAGO MÉDIO</b>", style_celula_cabecalho),
             Paragraph("<b>P. GÔNDOLA</b>", style_celula_cabecalho),
-            Paragraph("<b>MARKUP PRAT. / RECOM.</b>", style_celula_cabecalho),
+            Paragraph("<b>MARKUP (REC. / LOJA)</b>", style_celula_cabecalho),
             Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
         ]]
         
         for i, row in enumerate(df_audit.to_dict('records')):
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            p_custo_medio = float(row.get('PREÇO PAGO MÉDIO', 0.0))
+            p_pago_val = row.get('PREÇO PAGO MÉDIO', 0.0)
             
-            # Markup calculado com base no preço médio pago pelo cliente no cubo de vendas
+            p_custo_medio = float(p_pago_val) if isinstance(p_pago_val, (int, float)) else 0.0
+            
             if p_custo_medio > 0:
-                markup_praticado = ((p_loja - p_custo_medio) / p_custo_medio) * 100
+                markup_praticado = ((p_loja - p_custo_medio) / p_custo_medio) * 100 if p_loja > 0 else 0.0
+                markup_recomendado = ((p_rec - p_custo_medio) / p_custo_medio) * 100 if p_rec > 0 else 0.0
             else:
                 markup_praticado = 0.0
-
-            if p_rec > 0:
-                markup_recomendado = ((p_rec - p_custo_medio) / p_custo_medio) * 100 if p_custo_medio > 0 else 0.0
-            else:
                 markup_recomendado = 0.0
+
+            # Cores conforme solicitado
+            if p_custo_medio > 0:
+                cor_rec = "#059669" # Verde
+                cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
+                markup_txt = f"<b><font color='{cor_rec}'>Rec: {markup_recomendado:.0f}%</font></b><br/><b><font color='{cor_loja}'>Loja: {markup_praticado:.0f}%</font></b>"
+            else:
+                markup_txt = f"<b><font color='#059669'>Rec: N/D</font></b><br/><b>Loja: N/D</b>"
+
+            pago_str = f"R$ {p_custo_medio:.2f}" if p_custo_medio > 0 else str(p_pago_val)
 
             if p_loja == 0 or row.get('FALTA NA LOJA?'):
                 sit_html = "<b><font color='red'>FALTA</font></b>"
-            elif p_custo_medio > 0 and markup_praticado > (markup_recomendado * 1.25): # Exagero se 25% acima do recom.
-                sit_html = f"<b><font color='#991B1B'>EXAGERO (+{markup_praticado:.0f}%)</font></b>"
             else:
-                sit_html = f"<b><font color='green'>OK ({markup_praticado:.0f}%)</font></b>"
+                sit_html = "OK"
             
             data_audit.append([
                 Paragraph(str(row.get('PRODUTO', '')), style_celula),
                 Paragraph(f"R$ {p_rec:.2f}", style_celula),
-                Paragraph(f"R$ {p_custo_medio:.2f}", style_celula),
+                Paragraph(pago_str, style_celula),
                 Paragraph(f"R$ {p_loja:.2f}", style_celula),
-                Paragraph(sit_html, style_celula),
+                Paragraph(markup_txt, style_celula),
                 Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
             ])
 
-        t1 = Table(data_audit, colWidths=[175, 50, 55, 60, 115, 45])
+        t1 = Table(data_audit, colWidths=[160, 60, 75, 60, 100, 45])
         t1.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
@@ -295,11 +301,13 @@ else:
             
             # Cálculo do Preço Médio Pago pelo Cliente neste produto usando o Cubo de Vendas
             preco_medio_pago = 0.0
+            tem_venda = False
             if not historico_item.empty:
                 total_v_item = historico_item['TOTAL VALOR'].sum() if 'TOTAL VALOR' in historico_item.columns else 0.0
                 total_q_item = historico_item['TOTAL QTD'].sum() if 'TOTAL QTD' in historico_item.columns else 0.0
                 if total_q_item > 0:
                     preco_medio_pago = total_v_item / total_q_item
+                    tem_venda = True
 
             info_ultima_compra = ""
             if not historico_item.empty and 'DATA' in historico_item.columns:
@@ -315,10 +323,13 @@ else:
 
             produto_nome_detalhado = f"{n}{info_ultima_compra}"
 
+            # Valor exibido na coluna de preço pago
+            preco_pago_exibicao = round(preco_medio_pago, 2) if tem_venda else "Não foram encontradas vendas este ano"
+
             if c in comp_cli:
                 dados_audit_view.append({
                     "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
-                    "PREÇO PAGO MÉDIO": round(preco_medio_pago, 2),
+                    "PREÇO PAGO": preco_pago_exibicao,
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
@@ -329,7 +340,52 @@ else:
                 prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
-            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "PREÇO PAGO MÉDIO", "SUGERIDO"])
+            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "PREÇO PAGO", "SUGERIDO"])
+            
+            # --- TABELA DE AVALIAÇÃO DE MARKUP NA TELA (COM CORES PEDIDAS) ---
+            st.markdown("### 📊 Auditoria de Markup (Recomendado vs Loja)")
+            
+            preview_markup = []
+            for r in df_edit.to_dict('records'):
+                p_sug = converter_preco(r['SUGERIDO'])
+                p_loj = float(r['PREÇO GÔNDOLA'])
+                p_pago_item = r['PREÇO PAGO']
+                
+                custo_base = float(p_pago_item) if isinstance(p_pago_item, (int, float)) else 0.0
+                
+                if custo_base > 0:
+                    mk_rec = ((p_sug - custo_base) / custo_base) * 100 if p_sug > 0 else 0.0
+                    mk_loj = ((p_loj - custo_base) / custo_base) * 100 if p_loj > 0 else 0.0
+                    
+                    # Regra de cor para o da loja
+                    if mk_loj > mk_rec:
+                        cor_estilo_loja = "color: #991B1B; font-weight: bold;" # Vermelho negrito
+                        status_markup = "⚠️ Acima do Recomendado"
+                    else:
+                        cor_estilo_loja = "color: #059669; font-weight: bold;" # Verde negrito
+                        status_markup = "✅ Adequado (Igual ou Menor)"
+                        
+                    rec_str = f"R$ {p_sug:.2f} ({mk_rec:.1f}%)"
+                    loja_str = f"R$ {p_loj:.2f} ({mk_loj:.1f}%)"
+                    pago_str = f"R$ {custo_base:.2f}"
+                else:
+                    rec_str = f"R$ {p_sug:.2f}"
+                    loja_str = f"R$ {p_loj:.2f}"
+                    pago_str = str(p_pago_item)
+                    cor_estilo_loja = "font-weight: bold;"
+                    status_markup = "Sem base de custo"
+
+                preview_markup.append({
+                    "Produto": r['PRODUTO'],
+                    "Preço Pago": pago_str,
+                    "Preço Recomendado": rec_str,
+                    "Preço Gôndola": loja_str,
+                    "Status / Avaliação": status_markup
+                })
+
+            df_prev = pd.DataFrame(preview_markup)
+            st.dataframe(df_prev, use_container_width=True, hide_index=True)
+
             obs_text = st.text_area("🗣️ Observações:")
             if st.button("🚀 ENVIAR RELATÓRIO"):
                 horario_ref = obter_horario_brasil()
