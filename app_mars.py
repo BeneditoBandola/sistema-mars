@@ -5,6 +5,7 @@ import unicodedata
 import smtplib
 import gspread
 import re
+import zipfile
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -82,23 +83,48 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
-# --- CARREGAR BASE DE VENDAS (NOVO CUBO EXCEL) ---
+# --- CARREGAR BASE DE VENDAS (SUPORTE A EXCEL, CSV E ZIP) ---
 @st.cache_data(ttl=300)
 def carregar_dados():
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     df_v = pd.DataFrame()
-    caminho_excel = os.path.join(diretorio_atual, "vendas somente mars de 2026 ate 15 de setembro.xlsx")
-    if not os.path.exists(caminho_excel):
-        caminho_excel = "vendas somente mars de 2026 ate 15 de setembro.xlsx"
     
+    possiveis_arquivos = [
+        "vendas somente mars de 2026 ate 15 de setembro.xlsx",
+        "VENDAS_ATUALIZADAS_2026.zip",
+        "VENDAS_ATUALIZADAS_2026.csv"
+    ]
+    
+    caminho_encontrado = None
+    for arq in possiveis_arquivos:
+        c_teste = os.path.join(diretorio_atual, arq)
+        if os.path.exists(c_teste):
+            caminho_encontrado = c_teste
+            break
+        elif os.path.exists(arq):
+            caminho_encontrado = arq
+            break
+
     try:
-        if os.path.exists(caminho_excel):
-            df_v = pd.read_excel(caminho_excel, sheet_name=0)
+        if caminho_encontrado:
+            if caminho_encontrado.endswith('.zip'):
+                with zipfile.ZipFile(caminho_encontrado, 'r') as z:
+                    nome_interno = [name for name in z.namelist() if name.endswith(('.xlsx', '.xls', '.csv'))][0]
+                    with z.open(nome_interno) as f:
+                        if nome_interno.endswith('.csv'):
+                            df_v = pd.read_csv(f, sep=';', encoding='latin1', low_memory=False)
+                        else:
+                            df_v = pd.read_excel(f)
+            elif caminho_encontrado.endswith('.csv'):
+                df_v = pd.read_csv(caminho_encontrado, sep=';', encoding='latin1', low_memory=False)
+            else:
+                df_v = pd.read_excel(caminho_encontrado, sheet_name=0)
+                
             df_v.columns = [c.strip().upper() for c in df_v.columns]
             if 'DATA' in df_v.columns:
                 df_v['DATA'] = pd.to_datetime(df_v['DATA'], errors='coerce')
     except Exception as e:
-        st.error(f"Erro ao carregar cubo de vendas: {e}")
+        st.error(f"Erro ao carregar base de vendas: {e}")
     return df_v
 
 # --- LISTA MESTRA FOCAL ---
@@ -154,7 +180,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         for i, row in enumerate(df_audit.to_dict('records')):
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
-            p_pago_val = row.get('PREÇO PAGO MÉDIO', 0.0)
+            p_pago_val = row.get('PREÇO PAGO', 0.0)
             
             p_custo_medio = float(p_pago_val) if isinstance(p_pago_val, (int, float)) else 0.0
             
@@ -165,7 +191,6 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 markup_praticado = 0.0
                 markup_recomendado = 0.0
 
-            # Cores conforme solicitado
             if p_custo_medio > 0:
                 cor_rec = "#059669" # Verde
                 cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
@@ -299,7 +324,6 @@ else:
         for c, n in PRODUTOS_FOCAIS.items():
             historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
             
-            # Cálculo do Preço Médio Pago pelo Cliente neste produto usando o Cubo de Vendas
             preco_medio_pago = 0.0
             tem_venda = False
             if not historico_item.empty:
@@ -323,7 +347,6 @@ else:
 
             produto_nome_detalhado = f"{n}{info_ultima_compra}"
 
-            # Valor exibido na coluna de preço pago
             preco_pago_exibicao = round(preco_medio_pago, 2) if tem_venda else "Não foram encontradas vendas este ano"
 
             if c in comp_cli:
@@ -342,7 +365,7 @@ else:
         if dados_audit_view:
             df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "PREÇO PAGO", "SUGERIDO"])
             
-            # --- TABELA DE AVALIAÇÃO DE MARKUP NA TELA (COM CORES PEDIDAS) ---
+            # --- TABELA DE AVALIAÇÃO DE MARKUP NA TELA ---
             st.markdown("### 📊 Auditoria de Markup (Recomendado vs Loja)")
             
             preview_markup = []
@@ -357,12 +380,9 @@ else:
                     mk_rec = ((p_sug - custo_base) / custo_base) * 100 if p_sug > 0 else 0.0
                     mk_loj = ((p_loj - custo_base) / custo_base) * 100 if p_loj > 0 else 0.0
                     
-                    # Regra de cor para o da loja
                     if mk_loj > mk_rec:
-                        cor_estilo_loja = "color: #991B1B; font-weight: bold;" # Vermelho negrito
                         status_markup = "⚠️ Acima do Recomendado"
                     else:
-                        cor_estilo_loja = "color: #059669; font-weight: bold;" # Verde negrito
                         status_markup = "✅ Adequado (Igual ou Menor)"
                         
                     rec_str = f"R$ {p_sug:.2f} ({mk_rec:.1f}%)"
@@ -372,7 +392,6 @@ else:
                     rec_str = f"R$ {p_sug:.2f}"
                     loja_str = f"R$ {p_loj:.2f}"
                     pago_str = str(p_pago_item)
-                    cor_estilo_loja = "font-weight: bold;"
                     status_markup = "Sem base de custo"
 
                 preview_markup.append({
