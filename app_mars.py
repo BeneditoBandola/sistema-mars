@@ -10,7 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -140,11 +140,14 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     loja_limpa = re.sub(r'[^\w\s-]', '', loja).strip().replace(' ', '_')
     nome_arquivo = f"Oportunidades_{loja_limpa}.pdf"
 
-    doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    # Modo paisagem para caber tudo perfeitamente
+    doc = SimpleDocTemplate(nome_arquivo, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
     
-    style_celula = ParagraphStyle('EstiloCelula', parent=estilos['Normal'], fontSize=8, leading=10, textColor=colors.HexColor('#1F2937'))
-    style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.white, fontName="Helvetica-Bold")
+    # Estilos centralizados
+    style_celula = ParagraphStyle('EstiloCelula', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=1) # 1 = Center
+    style_celula_esq = ParagraphStyle('EstiloCelulaEsq', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=0) # 0 = Left para o nome do produto
+    style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=10, leading=12, textColor=colors.white, fontName="Helvetica-Bold", alignment=1)
 
     dt_pdf = obter_horario_brasil()
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES E MARKUP MARS</b>", estilos['Title']))
@@ -163,6 +166,15 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
         ]]
         
+        table_styles = [
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+        ]
+
         for i, row in enumerate(df_audit.to_dict('records')):
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
@@ -190,9 +202,13 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 sit_html = "<b><font color='red'>FALTA</font></b>"
             else:
                 sit_html = "OK"
+
+            # Efeito marca-texto se o preço da gôndola estiver muito abaixo do recomendado (diferença maior que R$ 0,50 ou menor que o rec)
+            if p_loja > 0 and p_rec > 0 and p_loja < (p_rec - 0.50):
+                table_styles.append(('BACKGROUND', (0, i+1), (-1, i+1), colors.HexColor('#FEF3C7'))) # Amarelo marca-texto
             
             data_audit.append([
-                Paragraph(str(row.get('PRODUTO', '')), style_celula),
+                Paragraph(str(row.get('PRODUTO', '')), style_celula_esq),
                 Paragraph(f"R$ {p_rec:.2f}", style_celula),
                 Paragraph(pago_str, style_celula),
                 Paragraph(f"R$ {p_loja:.2f}", style_celula),
@@ -200,14 +216,9 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
             ])
 
-        t1 = Table(data_audit, colWidths=[160, 60, 75, 60, 100, 45])
-        t1.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-            ('TOPPADDING', (0,0), (-1,-1), 5),
-        ]))
+        # Larguras ajustadas para formato paisagem (A4 Deitado ~ 841 pts úteis)
+        t1 = Table(data_audit, colWidths=[310, 85, 95, 85, 120, 50])
+        t1.setStyle(TableStyle(table_styles))
         elementos.append(t1)
 
     elementos.append(Spacer(1, 10))
@@ -221,17 +232,18 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     for f in df_faltantes:
         data_f.append([
             Paragraph(str(f[0]), style_celula),
-            Paragraph(str(f[1]), style_celula),
+            Paragraph(str(f[1]), style_celula_esq),
             Paragraph(str(f[2]), style_celula)
         ])
         
-    t2 = Table(data_f, colWidths=[60, 260, 180])
+    t2 = Table(data_f, colWidths=[80, 400, 265])
     t2.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
     ]))
     elementos.append(t2)
 
