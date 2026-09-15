@@ -83,48 +83,34 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
-# --- CARREGAR BASE DE VENDAS (SUPORTE A EXCEL, CSV E ZIP) ---
+# --- CARREGAR BASE DE VENDAS (LENDO DIRETAMENTE DO ZIP) ---
 @st.cache_data(ttl=300)
 def carregar_dados():
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     df_v = pd.DataFrame()
     
-    possiveis_arquivos = [
-        "vendas somente mars de 2026 ate 15 de setembro.xlsx",
-        "VENDAS_ATUALIZADAS_2026.zip",
-        "VENDAS_ATUALIZADAS_2026.csv"
-    ]
-    
-    caminho_encontrado = None
-    for arq in possiveis_arquivos:
-        c_teste = os.path.join(diretorio_atual, arq)
-        if os.path.exists(c_teste):
-            caminho_encontrado = c_teste
-            break
-        elif os.path.exists(arq):
-            caminho_encontrado = arq
-            break
+    nome_zip = "vendas somente mars de 2026 ate 15 de setembro.zip"
+    caminho_zip = os.path.join(diretorio_atual, nome_zip)
+    if not os.path.exists(caminho_zip):
+        caminho_zip = nome_zip if os.path.exists(nome_zip) else None
 
     try:
-        if caminho_encontrado:
-            if caminho_encontrado.endswith('.zip'):
-                with zipfile.ZipFile(caminho_encontrado, 'r') as z:
-                    nome_interno = [name for name in z.namelist() if name.endswith(('.xlsx', '.xls', '.csv'))][0]
-                    with z.open(nome_interno) as f:
+        if caminho_zip and os.path.exists(caminho_zip):
+            with zipfile.ZipFile(caminho_zip, 'r') as z:
+                nomes_internos = [name for name in z.namelist() if name.endswith(('.xlsx', '.xls', '.csv'))]
+                if nomes_internos:
+                    nome_interno = nomes_internos[0]
+                    with z.open(nome_interno) as f_zip:
                         if nome_interno.endswith('.csv'):
-                            df_v = pd.read_csv(f, sep=';', encoding='latin1', low_memory=False)
+                            df_v = pd.read_csv(f_zip, sep=';', encoding='latin1', low_memory=False)
                         else:
-                            df_v = pd.read_excel(f)
-            elif caminho_encontrado.endswith('.csv'):
-                df_v = pd.read_csv(caminho_encontrado, sep=';', encoding='latin1', low_memory=False)
-            else:
-                df_v = pd.read_excel(caminho_encontrado, sheet_name=0)
-                
+                            df_v = pd.read_excel(f_zip)
+                            
             df_v.columns = [c.strip().upper() for c in df_v.columns]
             if 'DATA' in df_v.columns:
                 df_v['DATA'] = pd.to_datetime(df_v['DATA'], errors='coerce')
     except Exception as e:
-        st.error(f"Erro ao carregar base de vendas: {e}")
+        st.error(f"Erro ao carregar base do zip: {e}")
     return df_v
 
 # --- LISTA MESTRA FOCAL ---
