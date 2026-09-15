@@ -140,13 +140,11 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     loja_limpa = re.sub(r'[^\w\s-]', '', loja).strip().replace(' ', '_')
     nome_arquivo = f"Oportunidades_{loja_limpa}.pdf"
 
-    # Modo paisagem para caber tudo perfeitamente
     doc = SimpleDocTemplate(nome_arquivo, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos, estilos = [], getSampleStyleSheet()
     
-    # Estilos centralizados
-    style_celula = ParagraphStyle('EstiloCelula', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=1) # 1 = Center
-    style_celula_esq = ParagraphStyle('EstiloCelulaEsq', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=0) # 0 = Left para o nome do produto
+    style_celula = ParagraphStyle('EstiloCelula', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=1)
+    style_celula_esq = ParagraphStyle('EstiloCelulaEsq', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=0)
     style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=10, leading=12, textColor=colors.white, fontName="Helvetica-Bold", alignment=1)
 
     dt_pdf = obter_horario_brasil()
@@ -190,7 +188,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 markup_recomendado = 0.0
 
             if p_custo_medio > 0:
-                cor_rec = "#059669" # Verde
+                cor_rec = "#059669"
                 cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
                 markup_txt = f"<b><font color='{cor_rec}'>Rec: {markup_recomendado:.0f}%</font></b><br/><b><font color='{cor_loja}'>Loja: {markup_praticado:.0f}%</font></b>"
             else:
@@ -203,9 +201,8 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             else:
                 sit_html = "OK"
 
-            # Efeito marca-texto se o preço da gôndola estiver muito abaixo do recomendado (diferença maior que R$ 0,50 ou menor que o rec)
             if p_loja > 0 and p_rec > 0 and p_loja < (p_rec - 0.50):
-                table_styles.append(('BACKGROUND', (0, i+1), (-1, i+1), colors.HexColor('#FEF3C7'))) # Amarelo marca-texto
+                table_styles.append(('BACKGROUND', (0, i+1), (-1, i+1), colors.HexColor('#FEF3C7')))
             
             data_audit.append([
                 Paragraph(str(row.get('PRODUTO', '')), style_celula_esq),
@@ -216,7 +213,6 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
             ])
 
-        # Larguras ajustadas para formato paisagem (A4 Deitado ~ 841 pts úteis)
         t1 = Table(data_audit, colWidths=[310, 85, 95, 85, 120, 50])
         t1.setStyle(TableStyle(table_styles))
         elementos.append(t1)
@@ -350,7 +346,7 @@ else:
             if c in comp_cli:
                 dados_audit_view.append({
                     "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
-                    "PREÇO PAGO": preco_pago_exibicao,
+                    "PREÇO PAGO": preco_pago_exibicao, # Mantido no dicionário para os cálculos e PDF
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
@@ -361,7 +357,15 @@ else:
                 prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
-            df_edit = st.data_editor(pd.DataFrame(dados_audit_view), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "PREÇO PAGO", "SUGERIDO"])
+            # Removemos a coluna "PREÇO PAGO" da exibição do editor interativo na tela
+            df_para_editar = pd.DataFrame(dados_audit_view)
+            df_para_exibir_tela = df_para_editar.drop(columns=["PREÇO PAGO"])
+            
+            df_edit_tela = st.data_editor(df_para_exibir_tela, use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
+            
+            # Reincorpora a coluna PREÇO PAGO oculta para os cálculos internos
+            df_edit = df_edit_tela.copy()
+            df_edit["PREÇO PAGO"] = df_para_editar["PREÇO PAGO"].values
             
             # --- TABELA DE AVALIAÇÃO DE MARKUP NA TELA ---
             st.markdown("### 📊 Auditoria de Markup (Recomendado vs Loja)")
@@ -385,16 +389,13 @@ else:
                         
                     rec_str = f"R$ {p_sug:.2f} ({mk_rec:.1f}%)"
                     loja_str = f"R$ {p_loj:.2f} ({mk_loj:.1f}%)"
-                    pago_str = f"R$ {custo_base:.2f}"
                 else:
                     rec_str = f"R$ {p_sug:.2f}"
                     loja_str = f"R$ {p_loj:.2f}"
-                    pago_str = str(p_pago_item)
                     status_markup = "Sem base de custo"
 
                 preview_markup.append({
                     "Produto": r['PRODUTO'],
-                    "Preço Pago": pago_str,
                     "Preço Recomendado": rec_str,
                     "Preço Gôndola": loja_str,
                     "Status / Avaliação": status_markup
