@@ -103,6 +103,7 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
+@st.cache_data(ttl=60)
 def carregar_historico_gerencial():
     try:
         creds_dict = st.secrets["gcp_service_account"]
@@ -114,6 +115,51 @@ def carregar_historico_gerencial():
         return pd.DataFrame(dados)
     except:
         return pd.DataFrame()
+
+def recuperar_detalhes_auditoria(loja, data_hora_str):
+    """Busca os itens auditados da loja numa data específica na aba de detalhes."""
+    try:
+        creds_dict = st.secrets["gcp_service_account"]
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open("Torre_de_Controle_Mars")
+        try:
+            aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
+        except:
+            aba_detalhe = spreadsheet.get_worksheet(1)
+        
+        registros = aba_detalhe.get_all_records()
+        df_detalhes = pd.DataFrame(registros)
+        
+        # Filtra os dados da loja correspondente ao horário da pesquisa selecionada
+        df_filtrado = df_detalhes[(df_detalhes['LOJA'] == loja) & (df_detalhes['DATA/HORA'] == data_hora_str)]
+        
+        df_audit = []
+        df_faltantes = []
+        
+        for _, row in df_filtrado.iterrows():
+            if row['SITUAÇÃO'] == "FALTA" and float(row.get('PREÇO GÔNDOLA', 0)) == 0 and float(row.get('SUGERIDO', 0)) == 0:
+                 # Produto sem histórico de vendas (seção 2)
+                 df_faltantes.append([row['CÓDIGO'], row['PRODUTO'], row['SITUAÇÃO']])
+            else:
+                 # Produto auditado na tela principal (seção 1)
+                 df_audit.append({
+                     'CÓDIGO': row['CÓDIGO'],
+                     'PRODUTO': row['PRODUTO'],
+                     'FALTA NA LOJA?': True if row['SITUAÇÃO'] == "FALTA" else False,
+                     'PREÇO GÔNDOLA': float(row.get('PREÇO GÔNDOLA', 0)),
+                     'SUGERIDO': float(row.get('SUGERIDO', 0)),
+                     # Nota: como o preço pago médio não é salvo na planilha detalhada com o mesmo formato,
+                     # o recálculo do PDF pode exigir o valor original ou ser adaptado.
+                     # Vamos buscar o custo no momento se possível ou deixar 0.
+                     'PREÇO PAGO': 0.0 # Idealmente deveríamos salvar o "PREÇO PAGO" na aba oportunidades detalhadas
+                 })
+                 
+        return pd.DataFrame(df_audit), df_faltantes
+    except Exception as e:
+        print(f"Erro ao recuperar detalhes: {e}")
+        return pd.DataFrame(), []
 
 # --- CARREGAR BASE DE VENDAS ---
 @st.cache_data(ttl=300)
@@ -247,31 +293,32 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         t1.setStyle(TableStyle(table_styles))
         elementos.append(t1)
 
-    elementos.append(Spacer(1, 10))
-    elementos.append(Paragraph("<b>2. PRODUTO NÃO ENCONTRADO NA LOJA / HISTÓRICO</b>", estilos['Heading3']))
-    
-    data_f = [[
-        Paragraph("<b>Código</b>", style_celula_cabecalho),
-        Paragraph("<b>Produto</b>", style_celula_cabecalho),
-        Paragraph("<b>Histórico</b>", style_celula_cabecalho)
-    ]]
-    for f in df_faltantes:
-        data_f.append([
-            Paragraph(str(f[0]), style_celula),
-            Paragraph(str(f[1]), style_celula_esq),
-            Paragraph(str(f[2]), style_celula)
-        ])
+    if df_faltantes:
+        elementos.append(Spacer(1, 10))
+        elementos.append(Paragraph("<b>2. PRODUTO NÃO ENCONTRADO NA LOJA / HISTÓRICO</b>", estilos['Heading3']))
         
-    t2 = Table(data_f, colWidths=[70, 415, 250])
-    t2.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-    ]))
-    elementos.append(t2)
+        data_f = [[
+            Paragraph("<b>Código</b>", style_celula_cabecalho),
+            Paragraph("<b>Produto</b>", style_celula_cabecalho),
+            Paragraph("<b>Histórico</b>", style_celula_cabecalho)
+        ]]
+        for f in df_faltantes:
+            data_f.append([
+                Paragraph(str(f[0]), style_celula),
+                Paragraph(str(f[1]), style_celula_esq),
+                Paragraph(str(f[2]), style_celula)
+            ])
+            
+        t2 = Table(data_f, colWidths=[70, 415, 250])
+        t2.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#059669')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+        ]))
+        elementos.append(t2)
 
     if feedback and feedback.strip():
         elementos.append(Spacer(1, 12))
@@ -335,6 +382,63 @@ def enviar_email(assunto, pdf, lista_destinatarios, texto_customizado=""):
     except:
         return False
 
+# --- FUNÇÃO GERADORA COMPLETA (BENEDITO) ---
+def gerar_pdf_com_historico(loja, data_hora_str, promotor_nome, cidade, obs):
+    # Tenta recuperar os itens detalhados salvos na planilha
+    df_audit, df_faltantes = recuperar_detalhes_auditoria(loja, data_hora_str)
+    
+    if df_audit.empty and not df_faltantes:
+        # Se por algum motivo a leitura da aba de detalhes falhar,
+        # tentamos reconstruir através do Vendas.xlsx para essa loja
+        df_vendas = carregar_dados()
+        if not df_vendas.empty:
+             df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
+             v_loja = df_vendas[df_vendas['CLIENTE NOME'] == loja]
+             if not v_loja.empty:
+                 comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
+                 dados_audit_view, prod_faltantes = [], []
+                 
+                 # Define arquivo base do promotor
+                 arq_precos = "MINEIROS PREÇOS MARS COMPLETO.csv"
+                 if promotor_nome in ["RODRIGO", "CAROLINA", "SARUETE"]:
+                     arq_precos = "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
+                     
+                 for c, n in PRODUTOS_FOCAIS.items():
+                    historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
+                    preco_ultimo_pedido = 0.0
+                    tem_venda = False
+                    if not historico_item.empty and 'DATA' in historico_item.columns:
+                        historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
+                        historico_item = historico_item.sort_values(by='DATA_DT', ascending=False)
+                        ultima_linha = historico_item.iloc[0]
+                        dt_ult = ultima_linha['DATA_DT']
+                        qtd_ult = ultima_linha.get('TOTAL QTD', 0)
+                        val_ult = ultima_linha.get('TOTAL VALOR', 0)
+                        op_ult = str(ultima_linha.get('OPERACAO', 'VENDA')).strip()
+                        if pd.notna(qtd_ult) and qtd_ult > 0:
+                            preco_ultimo_pedido = val_ult / qtd_ult
+                            tem_venda = True
+                        info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y') if pd.notna(dt_ult) else 'Desconhecida'} - {op_ult} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
+                    else:
+                        info_ultima_compra = ""
+                    produto_nome_detalhado = f"{n}{info_ultima_compra}"
+                    if c in comp_cli:
+                        dados_audit_view.append({
+                            "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
+                            "PREÇO PAGO": preco_ultimo_pedido, 
+                            "PREÇO GÔNDOLA": 0.0, "SUGERIDO": buscar_preco_na_tabela(arq_precos, c)
+                        })
+                    else:
+                        if not historico_item.empty:
+                            status_hist = f"PRODUTO NÃO ENCONTRADO NA LOJA{info_ultima_compra}"
+                        else:
+                            status_hist = "PRODUTO NÃO ENCONTRADO NA LOJA (NÃO COMPRADO ESTE ANO)"
+                        prod_faltantes.append([c, produto_nome_detalhado, status_hist])
+                 df_audit = pd.DataFrame(dados_audit_view)
+                 
+    # O arquivo PDF final
+    return gerar_pdf_mars(promotor_nome, loja, cidade, df_audit, df_faltantes, obs)
+
 # --- INTERFACE PRINCIPAL ---
 st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES & MARKUP MARS</h1>", unsafe_allow_html=True)
 
@@ -377,72 +481,74 @@ else:
             st.rerun()
 
         st.markdown("## 📊 Painel Gerencial - Torre de Controle")
-        st.markdown("Selecione abaixo as pesquisas desejadas (filtradas automaticamente para o mês atual), digite seu texto e encaminhe.")
+        st.markdown("Selecione abaixo as pesquisas desejadas (filtradas para o mês atual), digite seu texto e encaminhe.")
 
         texto_personalizado_benedito = st.text_area("📝 Digite o texto que irá no corpo do e-mail (opcional):", placeholder="Ex: Time, favor acompanhar de perto as lojas listadas abaixo...")
 
         df_hist = carregar_historico_gerencial()
         if not df_hist.empty:
-            # Filtro para exibir apenas pesquisas do mês atual (Setembro / 2026)
             if 'DATA/HORA' in df_hist.columns:
-                df_hist['DATA_DT'] = pd.to_datetime(df_hist['DATA/HORA'], errors='coerce')
+                df_hist['DATA_DT'] = pd.to_datetime(df_hist['DATA/HORA'], format='%d/%m/%Y %H:%M', errors='coerce')
                 mes_atual = datetime.now().month
                 ano_atual = datetime.now().year
                 df_hist = df_hist[(df_hist['DATA_DT'].dt.month == mes_atual) & (df_hist['DATA_DT'].dt.year == ano_atual)]
                 df_hist = df_hist.drop(columns=['DATA_DT'])
 
-            df_hist.insert(0, "SELECIONAR", False)
-            df_selecionado = st.data_editor(df_hist, use_container_width=True, hide_index=True)
-            
-            st.markdown("---")
-            st.markdown("### ⚡ Ações Rápidas de Encaminhamento & Teste")
-            
-            col_a, col_b, col_c = st.columns(3)
-            
-            with col_a:
-                if st.button("📤 ENCAMINHAR SELECIONADOS PARA O TIME SP", use_container_width=True):
-                    selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
-                    if not selecionados.empty:
-                        sucessos = 0
-                        for _, row in selecionados.iterrows():
-                            loja_nome = row.get('LOJA', 'Loja')
-                            pdf_file = gerar_pdf_mars(row.get('PROMOTOR', 'Promotor'), loja_nome, row.get('CIDADE', ''), pd.DataFrame(), [], row.get('OBS', ''))
-                            if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (SP): {loja_nome}", pdf_file, EMAILS_TIME_SP, texto_personalizado_benedito):
-                                sucessos += 1
-                        st.success(f"✅ {sucessos} relatório(s) encaminhado(s) para o **Time SP**!")
-                    else:
-                        st.warning("⚠️ Selecione ao menos uma linha na tabela.")
-            
-            with col_b:
-                if st.button("📤 ENCAMINHAR SELECIONADOS PARA O TIME MG", use_container_width=True):
-                    selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
-                    if not selecionados.empty:
-                        sucessos = 0
-                        for _, row in selecionados.iterrows():
-                            loja_nome = row.get('LOJA', 'Loja')
-                            pdf_file = gerar_pdf_mars(row.get('PROMOTOR', 'Promotor'), loja_nome, row.get('CIDADE', ''), pd.DataFrame(), [], row.get('OBS', ''))
-                            if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (MG): {loja_nome}", pdf_file, EMAILS_TIME_MG, texto_personalizado_benedito):
-                                sucessos += 1
-                        st.success(f"✅ {sucessos} relatório(s) encaminhado(s) para o **Time MG**!")
-                    else:
-                        st.warning("⚠️ Selecione ao menos uma linha na tabela.")
+            if df_hist.empty:
+                st.info("Nenhum relatório registrado na planilha de controle para este mês.")
+            else:
+                df_hist.insert(0, "SELECIONAR", False)
+                df_selecionado = st.data_editor(df_hist, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                st.markdown("### ⚡ Ações Rápidas de Encaminhamento & Teste")
+                
+                col_a, col_b, col_c = st.columns(3)
+                
+                with col_a:
+                    if st.button("📤 ENCAMINHAR PARA O TIME SP", use_container_width=True):
+                        selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
+                        if not selecionados.empty:
+                            sucessos = 0
+                            for _, row in selecionados.iterrows():
+                                loja_nome = row.get('LOJA', 'Loja')
+                                # RECRIA O PDF COMPLETO COM DADOS DA PLANILHA / VENDAS
+                                pdf_file = gerar_pdf_com_historico(loja_nome, row.get('DATA/HORA', ''), row.get('PROMOTOR', 'Promotor'), row.get('CIDADE', ''), row.get('OBS', ''))
+                                if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (SP): {loja_nome}", pdf_file, EMAILS_TIME_SP, texto_personalizado_benedito):
+                                    sucessos += 1
+                            st.success(f"✅ {sucessos} relatório(s) encaminhado(s) para o **Time SP**!")
+                        else:
+                            st.warning("⚠️ Selecione ao menos uma linha na tabela.")
+                
+                with col_b:
+                    if st.button("📤 ENCAMINHAR PARA O TIME MG", use_container_width=True):
+                        selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
+                        if not selecionados.empty:
+                            sucessos = 0
+                            for _, row in selecionados.iterrows():
+                                loja_nome = row.get('LOJA', 'Loja')
+                                pdf_file = gerar_pdf_com_historico(loja_nome, row.get('DATA/HORA', ''), row.get('PROMOTOR', 'Promotor'), row.get('CIDADE', ''), row.get('OBS', ''))
+                                if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (MG): {loja_nome}", pdf_file, EMAILS_TIME_MG, texto_personalizado_benedito):
+                                    sucessos += 1
+                            st.success(f"✅ {sucessos} relatório(s) encaminhado(s) para o **Time MG**!")
+                        else:
+                            st.warning("⚠️ Selecione ao menos uma linha na tabela.")
 
-            with col_c:
-                if st.button("🧪 TESTAR ENVIO (APENAS BENEDITO)", use_container_width=True):
-                    selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
-                    if not selecionados.empty:
-                        sucessos = 0
-                        for _, row in selecionados.iterrows():
-                            loja_nome = row.get('LOJA', 'Loja')
-                            pdf_file = gerar_pdf_mars(row.get('PROMOTOR', 'Promotor'), loja_nome, row.get('CIDADE', ''), pd.DataFrame(), [], row.get('OBS', ''))
-                            # Envia apenas para o seu e-mail de teste
-                            if enviar_email(f"🧪 [TESTE] OPORTUNIDADE & MARKUP: {loja_nome}", pdf_file, ["benedito.bandola@minassal.com.br"], texto_personalizado_benedito):
-                                sucessos += 1
-                        st.success(f"🧪 {sucessos} relatório(s) de teste enviado(s) para **benedito.bandola@minassal.com.br**!")
-                    else:
-                        st.warning("⚠️ Selecione ao menos uma linha na tabela para o teste.")
+                with col_c:
+                    if st.button("🧪 TESTAR ENVIO (APENAS BENEDITO)", use_container_width=True):
+                        selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
+                        if not selecionados.empty:
+                            sucessos = 0
+                            for _, row in selecionados.iterrows():
+                                loja_nome = row.get('LOJA', 'Loja')
+                                pdf_file = gerar_pdf_com_historico(loja_nome, row.get('DATA/HORA', ''), row.get('PROMOTOR', 'Promotor'), row.get('CIDADE', ''), row.get('OBS', ''))
+                                if enviar_email(f"🧪 [TESTE] OPORTUNIDADE & MARKUP: {loja_nome}", pdf_file, ["benedito.bandola@minassal.com.br"], texto_personalizado_benedito):
+                                    sucessos += 1
+                            st.success(f"🧪 {sucessos} relatório(s) de teste enviado(s) para **benedito.bandola@minassal.com.br**!")
+                        else:
+                            st.warning("⚠️ Selecione ao menos uma linha na tabela para o teste.")
         else:
-            st.info("Nenhum relatório registrado na planilha de controle para este mês.")
+            st.info("Nenhum relatório registrado na planilha de controle ainda.")
 
     else:
         # --- FLUXO NORMAL DOS PROMOTORES ---
