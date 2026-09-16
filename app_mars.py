@@ -158,7 +158,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         data_audit = [[
             Paragraph("<b>PRODUTO</b>", style_celula_cabecalho),
             Paragraph("<b>P. RECOMENDADO</b>", style_celula_cabecalho),
-            Paragraph("<b>P. PAGO MÉDIO</b>", style_celula_cabecalho),
+            Paragraph("<b>P. PAGO ÚLTIMO PEDIDO</b>", style_celula_cabecalho),
             Paragraph("<b>P. GÔNDOLA</b>", style_celula_cabecalho),
             Paragraph("<b>MARKUP (REC. / LOJA)</b>", style_celula_cabecalho),
             Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
@@ -178,28 +178,23 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
             p_pago_val = row.get('PREÇO PAGO', 0.0)
             
-            p_custo_medio = float(p_pago_val) if isinstance(p_pago_val, (int, float)) else 0.0
+            p_custo_ult = float(p_pago_val) if isinstance(p_pago_val, (int, float)) else 0.0
             
-            if p_custo_medio > 0:
-                markup_praticado = ((p_loja - p_custo_medio) / p_custo_medio) * 100 if p_loja > 0 else 0.0
-                markup_recomendado = ((p_rec - p_custo_medio) / p_custo_medio) * 100 if p_rec > 0 else 0.0
+            if p_custo_ult > 0:
+                markup_praticado = ((p_loja - p_custo_ult) / p_custo_ult) * 100 if p_loja > 0 else 0.0
+                markup_recomendado = ((p_rec - p_custo_ult) / p_custo_ult) * 100 if p_rec > 0 else 0.0
             else:
                 markup_praticado = 0.0
                 markup_recomendado = 0.0
 
-            if p_custo_medio > 0:
+            if p_custo_ult > 0:
                 cor_rec = "#059669"
                 cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
                 markup_txt = f"<b><font color='{cor_rec}'>Rec: {markup_recomendado:.0f}%</font></b><br/><b><font color='{cor_loja}'>Loja: {markup_praticado:.0f}%</font></b>"
             else:
                 markup_txt = f"<b><font color='#059669'>Rec: N/D</font></b><br/><b>Loja: N/D</b>"
 
-            pago_str = f"R$ {p_custo_medio:.2f}" if p_custo_medio > 0 else str(p_pago_val)
-
-            if p_loja == 0 or row.get('FALTA NA LOJA?'):
-                sit_html = "<b><font color='red'>FALTA</font></b>"
-            else:
-                sit_html = "OK"
+            pago_str = f"R$ {p_custo_ult:.2f}" if p_custo_ult > 0 else str(p_pago_val)
 
             if p_loja > 0 and p_rec > 0 and p_loja < (p_rec - 0.50):
                 table_styles.append(('BACKGROUND', (0, i+1), (-1, i+1), colors.HexColor('#FEF3C7')))
@@ -318,35 +313,35 @@ else:
         for c, n in PRODUTOS_FOCAIS.items():
             historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
             
-            preco_medio_pago = 0.0
+            preco_ultimo_pedido = 0.0
             tem_venda = False
-            if not historico_item.empty:
-                total_v_item = historico_item['TOTAL VALOR'].sum() if 'TOTAL VALOR' in historico_item.columns else 0.0
-                total_q_item = historico_item['TOTAL QTD'].sum() if 'TOTAL QTD' in historico_item.columns else 0.0
-                if total_q_item > 0:
-                    preco_medio_pago = total_v_item / total_q_item
-                    tem_venda = True
-
-            info_ultima_compra = ""
+            
             if not historico_item.empty and 'DATA' in historico_item.columns:
                 historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
-                idx_mais_recente = historico_item['DATA_DT'].idxmax()
-                if pd.notna(idx_mais_recente):
-                    ultima_linha = historico_item.loc[idx_mais_recente]
-                    dt_ult = ultima_linha['DATA_DT']
-                    qtd_ult = ultima_linha.get('TOTAL QTD', 0)
-                    op_ult = str(ultima_linha.get('OPERACAO', 'VENDA')).strip()
-                    if pd.notna(dt_ult):
-                        info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y')} - {op_ult} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
+                historico_item = historico_item.sort_values(by='DATA_DT', ascending=False)
+                ultima_linha = historico_item.iloc[0]
+                
+                dt_ult = ultima_linha['DATA_DT']
+                qtd_ult = ultima_linha.get('TOTAL QTD', 0)
+                val_ult = ultima_linha.get('TOTAL VALOR', 0)
+                op_ult = str(ultima_linha.get('OPERACAO', 'VENDA')).strip()
+                
+                if pd.notna(qtd_ult) and qtd_ult > 0:
+                    preco_ultimo_pedido = val_ult / qtd_ult
+                    tem_venda = True
+
+                info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y') if pd.notna(dt_ult) else 'Desconhecida'} - {op_ult} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
+            else:
+                info_ultima_compra = ""
 
             produto_nome_detalhado = f"{n}{info_ultima_compra}"
 
-            preco_pago_exibicao = round(preco_medio_pago, 2) if tem_venda else "Não foram encontradas vendas este ano"
+            preco_pago_exibicao = round(preco_ultimo_pedido, 2) if tem_venda else "Não foram encontradas vendas este ano"
 
             if c in comp_cli:
                 dados_audit_view.append({
                     "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
-                    "PREÇO PAGO": preco_pago_exibicao, # Mantido no dicionário para os cálculos e PDF
+                    "PREÇO PAGO": preco_pago_exibicao, 
                     "PREÇO GÔNDOLA": 0.0, "SUGERIDO": f"R$ {buscar_preco_na_tabela(arq_precos, c):.2f}"
                 })
             else:
@@ -357,13 +352,11 @@ else:
                 prod_faltantes.append([c, produto_nome_detalhado, status_hist])
         
         if dados_audit_view:
-            # Removemos a coluna "PREÇO PAGO" da exibição do editor interativo na tela
             df_para_editar = pd.DataFrame(dados_audit_view)
             df_para_exibir_tela = df_para_editar.drop(columns=["PREÇO PAGO"])
             
             df_edit_tela = st.data_editor(df_para_exibir_tela, use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
             
-            # Reincorpora a coluna PREÇO PAGO oculta para os cálculos internos
             df_edit = df_edit_tela.copy()
             df_edit["PREÇO PAGO"] = df_para_editar["PREÇO PAGO"].values
             
