@@ -186,7 +186,14 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             elif p_custo_ult > 0:
                 markup_praticado = ((p_loja - p_custo_ult) / p_custo_ult) * 100 if p_loja > 0 else 0.0
                 markup_recomendado = ((p_rec - p_custo_ult) / p_custo_ult) * 100 if p_rec > 0 else 0.0
-                cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
+                
+                if markup_praticado > 200:
+                    cor_loja = "#7C3AED" # Roxo destacado para markup acima de 200%
+                elif markup_praticado > markup_recomendado:
+                    cor_loja = "#991B1B" # Vermelho se acima do recomendado
+                else:
+                    cor_loja = "#059669" # Verde se adequado
+                    
                 markup_txt = f"<b><font color='{cor_loja}'>{markup_praticado:.0f}%</font></b>"
             else:
                 markup_txt = "<b>N/D</b>"
@@ -376,7 +383,9 @@ else:
                     mk_rec = ((p_sug - custo_base) / custo_base) * 100 if p_sug > 0 else 0.0
                     mk_loj = ((p_loj - custo_base) / custo_base) * 100 if p_loj > 0 else 0.0
                     
-                    if mk_loj > mk_rec:
+                    if mk_loj > 200:
+                        status_markup = "🟣 Markup Elevado (> 200%)"
+                    elif mk_loj > mk_rec:
                         status_markup = "⚠️ Acima do Recomendado"
                     else:
                         status_markup = "✅ Adequado (Igual ou Menor)"
