@@ -34,7 +34,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- DEFINIÇÃO DOS TIMES DE E-MAILS ---
+# --- DEFINIÇÃO DOS TIMES DE E-MAILS (PARA O PAINEL DO GESTOR) ---
 EMAILS_TIME_SP = [
     "caio.poli@minassal.com.br",
     "poli@minassal.com.br",
@@ -371,7 +371,7 @@ if 'user_mars' not in st.session_state:
 else:
     promotor = st.session_state.user_mars
 
-    # --- PAINEL EXCLUSIVO DO BENEDITO (GESTOR) COM TEXTO E SELEÇÃO DO MÊS ---
+    # --- PAINEL EXCLUSIVO DO BENEDITO (GESTOR) ---
     if promotor == "BENEDITO":
         st.sidebar.markdown("### 👑 Gestor: Benedito")
         if st.sidebar.button("Sair do Painel"):
@@ -379,7 +379,7 @@ else:
             st.rerun()
 
         st.markdown("## 📊 Painel Gerencial - Torre de Controle")
-        st.markdown("Selecione abaixo as pesquisas desejadas (**filtradas automaticamente para o mês atual**), digite seu recado (opcional) e encaminhe.")
+        st.markdown("Selecione abaixo as pesquisas desejadas (**filtradas para o mês atual**), digite seu recado (opcional) e encaminhe.")
 
         texto_personalizado_benedito = st.text_area("📝 Digite o texto que irá no corpo do e-mail (opcional):", placeholder="Ex: Time, favor acompanhar de perto as lojas listadas abaixo...")
 
@@ -405,20 +405,20 @@ else:
                 
                 with col_a:
                     if st.button("📤 ENCAMINHAR PARA O TIME SP", use_container_width=True):
-                        st.info("Ação em processamento para o Time SP...")
+                        st.info("Função de reenvio gerencial em processamento...")
                 
                 with col_b:
                     if st.button("📤 ENCAMINHAR PARA O TIME MG", use_container_width=True):
-                        st.info("Ação em processamento para o Time MG...")
+                        st.info("Função de reenvio gerencial em processamento...")
 
                 with col_c:
                     if st.button("🧪 TESTAR (SÓ PARA BENEDITO)", use_container_width=True):
-                        st.info("Ação de teste em processamento...")
+                        st.info("Função de teste em processamento...")
         else:
             st.info("Nenhum relatório registrado na planilha de controle ainda.")
 
     else:
-        # --- FLUXO NORMAL DOS PROMOTORES (LIMPO, SEM BOTÕES EXTRAS) ---
+        # --- FLUXO NORMAL DOS PROMOTORES (ENVIA EXCLUSIVAMENTE PARA O BENEDITO) ---
         df_vendas = carregar_dados()
         if df_vendas.empty:
             st.error("Aguardando carregamento da base do cubo de vendas...")
@@ -570,10 +570,11 @@ else:
                         
                         pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
                         
-                        destinos = EMAILS_TIME_SP if promotor in ["RODRIGO", "CAROLINA", "SARUETE"] else EMAILS_TIME_MG
-                        if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file, destinos):
+                        # ENVIO EXCLUSIVO PARA O BENEDITO
+                        destino_unico = ["benedito.bandola@minassal.com.br"]
+                        if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja} ({promotor})", pdf_file, destino_unico):
                             salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
-                            st.success("Enviado com sucesso!"); st.balloons()
+                            st.success("Enviado com sucesso para o Benedito!"); st.balloons()
             else:
                 st.warning("🚨 Mix Zero!")
                 obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
@@ -581,10 +582,10 @@ else:
                     horario_ref = obter_horario_brasil()
                     detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
                     pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), prod_faltantes, obs_z_mix)
-                    destinos = EMAILS_TIME_SP if promotor in ["RODRIGO", "CAROLINA", "SARUETE"] else EMAILS_TIME_MG
-                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file, destinos):
+                    destino_unico = ["benedito.bandola@minassal.com.br"]
+                    if enviar_email(f"🚨 MIX ZERO: {loja} ({promotor})", pdf_file, destino_unico):
                         salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
-                        st.success("Mix Zero registrado com sucesso!"); st.balloons()
+                        st.success("Mix Zero enviado com sucesso para o Benedito!"); st.balloons()
 
             st.markdown("---")
             st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
