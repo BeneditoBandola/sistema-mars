@@ -399,19 +399,31 @@ else:
 
             obs_text = st.text_area("🗣️ Observações:")
             if st.button("🚀 ENVIAR RELATÓRIO"):
-                horario_ref = obter_horario_brasil()
-                detalhado_rows = []
+                # --- TRAVA DE VALIDAÇÃO DE PREÇOS ZERADOS ---
+                tem_preco_zerado = False
                 for r in df_edit.to_dict('records'):
-                    status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                    p_sugerido_limpo = converter_preco(r['SUGERIDO'])
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
-                for f in prod_faltantes:
-                    detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
-                
-                pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
-                if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file):
-                    salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
-                    st.success("Enviado com sucesso!"); st.balloons()
+                    p_loj = float(r['PREÇO GÔNDOLA'])
+                    falta = r['FALTA NA LOJA?']
+                    if p_loj == 0.0 and not falta:
+                        tem_preco_zerado = True
+                        break
+
+                if tem_preco_zerado:
+                    st.error("🚨 **Atenção:** Há produtos com o **Preço Gôndola zerado (R$ 0,00)** que **não** estão marcados como falta (`FALTA NA LOJA?`). Por favor, preencha o preço correto ou marque a caixa de falta antes de enviar.")
+                else:
+                    horario_ref = obter_horario_brasil()
+                    detalhado_rows = []
+                    for r in df_edit.to_dict('records'):
+                        status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
+                        p_sugerido_limpo = converter_preco(r['SUGERIDO'])
+                        detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
+                    for f in prod_faltantes:
+                        detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
+                    
+                    pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
+                    if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file):
+                        salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
+                        st.success("Enviado com sucesso!"); st.balloons()
         else:
             st.warning("🚨 Mix Zero!")
             obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
