@@ -33,12 +33,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- DEFINIÇÃO DOS TIMES DE E-MAILS ---
+# --- DEFINIÇÃO DOS TIMES DE E-MAILS (COM O FÁBIO D'ALAVA INCLUÍDO) ---
 EMAILS_TIME_SP = [
     "caio.poli@minassal.com.br",
     "poli@minassal.com.br",
     "daniel.santini@minassal.com.br",
     "paulo.ferreira@minassal.com.br",
+    "fabio.dalava@minassal.com.br",
     "benedito.bandola@minassal.com.br"
 ]
 
@@ -47,6 +48,7 @@ EMAILS_TIME_MG = [
     "poli@minassal.com.br",
     "daniel.santini@minassal.com.br",
     "rubens.porfirio@minassal.com.br",
+    "fabio.dalava@minassal.com.br",
     "benedito.bandola@minassal.com.br"
 ]
 
@@ -289,12 +291,36 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     doc.build(elementos)
     return nome_arquivo
 
-def enviar_email(assunto, pdf, lista_destinatarios):
+def enviar_email(assunto, pdf, lista_destinatarios, texto_customizado=""):
     rem, sen = "beneditobandola@gmail.com", "kfih ccqx cskn oito"
     msg = MIMEMultipart()
     msg['From'] = rem
     msg['To'] = ", ".join(lista_destinatarios)
     msg['Subject'] = assunto
+    
+    # Corpo do e-mail com o texto customizado do Benedito, se houver
+    corpo_html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #1F2937;">
+        <h2 style="color: #1E3A8A;">🐾 Relatório de Oportunidades & Markup - Mars</h2>
+    """
+    if texto_customizado.strip():
+        corpo_html += f"""
+        <div style="background-color: #FEF3C7; border-left: 4px solid #D97706; padding: 12px; margin-bottom: 15px;">
+          <p style="margin: 0; font-size: 14px; font-weight: bold; color: #92400E;">Mensagem do Coordenador (Benedito):</p>
+          <p style="margin: 5px 0 0 0; font-size: 14px; color: #1F2937;">{texto_customizado.replace(chr(10), '<br>')}</p>
+        </div>
+        """
+    corpo_html += """
+        <p>Segue em anexo o relatório detalhado da auditoria realizada em campo.</p>
+        <hr style="border: none; border-top: 1px solid #E5E7EB;">
+        <p style="font-size: 12px; color: #6B7280;">Mensagem automática gerada pela Torre de Controle Minassal.</p>
+      </body>
+    </html>
+    """
+    
+    msg.attach(MIMEText(corpo_html, 'html'))
+    
     try:
         with open(pdf, "rb") as f:
             part = MIMEApplication(f.read(), Name=os.path.basename(pdf))
@@ -351,14 +377,14 @@ else:
             st.rerun()
 
         st.markdown("## 📊 Painel Gerencial - Torre de Controle")
-        st.markdown("Selecione abaixo as pesquisas desejadas e encaminhe rapidamente para os times com um clique.")
+        st.markdown("Selecione abaixo as pesquisas desejadas, digite seu texto personalizado e encaminhe para os times.")
+
+        # Caixa de texto para o Benedito digitar o recado do e-mail
+        texto_personalizado_benedito = st.text_area("📝 Digite o texto que irá no corpo do e-mail (opcional):", placeholder="Ex: Time, favor acompanhar de perto as lojas listadas abaixo...")
 
         df_hist = carregar_historico_gerencial()
         if not df_hist.empty:
-            # Adiciona coluna de seleção (Flag)
             df_hist.insert(0, "SELECIONAR", False)
-            
-            # Editor de tabela com checkboxes para o gestor escolher
             df_selecionado = st.data_editor(df_hist, use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -370,11 +396,14 @@ else:
                 if st.button("📤 ENCAMINHAR SELECIONADOS PARA O TIME SP", use_container_width=True):
                     selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
                     if not selecionados.empty:
-                        # Gera e envia para o Time SP
+                        sucessos = 0
                         for _, row in selecionados.iterrows():
-                            # Reconstri o PDF com base na linha da planilha ou usa o mais recente
-                            pass
-                        st.success(f"✅ {len(selecionados)} relatório(s) encaminhado(s) com sucesso para o **Time SP**!")
+                            loja_nome = row.get('LOJA', 'Loja')
+                            # Gera o PDF novamente para envio
+                            pdf_file = gerar_pdf_mars(row.get('PROMOTOR', 'Promotor'), loja_nome, row.get('CIDADE', ''), pd.DataFrame(), [], row.get('OBS', ''))
+                            if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (SP): {loja_nome}", pdf_file, EMAILS_TIME_SP, texto_personalizado_benedito):
+                                sucessos += 1
+                        st.success(f"✅ {sucessos} relatório(s) encaminhado(s) com sucesso para o **Time SP**!")
                     else:
                         st.warning("⚠️ Selecione ao menos uma linha na tabela acima.")
             
@@ -382,9 +411,13 @@ else:
                 if st.button("📤 ENCAMINHAR SELECIONADOS PARA O TIME MG", use_container_width=True):
                     selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
                     if not selecionados.empty:
+                        sucessos = 0
                         for _, row in selecionados.iterrows():
-                            pass
-                        st.success(f"✅ {len(selecionados)} relatório(s) encaminhado(s) com sucesso para o **Time MG**!")
+                            loja_nome = row.get('LOJA', 'Loja')
+                            pdf_file = gerar_pdf_mars(row.get('PROMOTOR', 'Promotor'), loja_nome, row.get('CIDADE', ''), pd.DataFrame(), [], row.get('OBS', ''))
+                            if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (MG): {loja_nome}", pdf_file, EMAILS_TIME_MG, texto_personalizado_benedito):
+                                sucessos += 1
+                        st.success(f"✅ {sucessos} relatório(s) encaminhado(s) com sucesso para o **Time MG**!")
                     else:
                         st.warning("⚠️ Selecione ao menos uma linha na tabela acima.")
         else:
@@ -543,8 +576,10 @@ else:
                         
                         pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
                         
-                        # Disparo automático com cópia para o coordenador Benedito
-                        if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file, EMAILS_TIME_MG):
+                        # Identifica para qual time enviar com base na cidade/promotor
+                        destinos = EMAILS_TIME_SP if promotor in ["RODRIGO", "CAROLINA", "SARUETE"] else EMAILS_TIME_MG
+                        
+                        if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file, destinos):
                             salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
                             st.success("Enviado com sucesso!"); st.balloons()
             else:
@@ -554,7 +589,8 @@ else:
                     horario_ref = obter_horario_brasil()
                     detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
                     pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), prod_faltantes, obs_z_mix)
-                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file, EMAILS_TIME_MG):
+                    destinos = EMAILS_TIME_SP if promotor in ["RODRIGO", "CAROLINA", "SARUETE"] else EMAILS_TIME_MG
+                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file, destinos):
                         salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
                         st.success("Mix Zero registrado com sucesso!"); st.balloons()
 
