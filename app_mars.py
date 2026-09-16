@@ -177,17 +177,15 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             p_rec = converter_preco(row.get('SUGERIDO', 0.0))
             p_loja = float(row.get('PREÇO GÔNDOLA', 0.0))
             p_pago_val = row.get('PREÇO PAGO', 0.0)
+            is_falta = row.get('FALTA NA LOJA?', False)
             
             p_custo_ult = float(p_pago_val) if isinstance(p_pago_val, (int, float)) else 0.0
             
-            if p_custo_ult > 0:
+            if is_falta or p_loja == 0.0:
+                markup_txt = "<b><font color='#DC2626'>FALTA</font></b>"
+            elif p_custo_ult > 0:
                 markup_praticado = ((p_loja - p_custo_ult) / p_custo_ult) * 100 if p_loja > 0 else 0.0
                 markup_recomendado = ((p_rec - p_custo_ult) / p_custo_ult) * 100 if p_rec > 0 else 0.0
-            else:
-                markup_praticado = 0.0
-                markup_recomendado = 0.0
-
-            if p_custo_ult > 0:
                 cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
                 markup_txt = f"<b><font color='{cor_loja}'>{markup_praticado:.0f}%</font></b>"
             else:
@@ -195,7 +193,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
 
             pago_str = f"R$ {p_custo_ult:.2f}" if p_custo_ult > 0 else str(p_pago_val)
 
-            if p_loja > 0 and p_rec > 0 and p_loja < (p_rec - 0.50):
+            if not is_falta and p_loja > 0 and p_rec > 0 and p_loja < (p_rec - 0.50):
                 table_styles.append(('BACKGROUND', (0, i+1), (-1, i+1), colors.HexColor('#FEF3C7')))
             
             data_audit.append([
@@ -204,7 +202,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 Paragraph(pago_str, style_celula),
                 Paragraph(f"R$ {p_loja:.2f}", style_celula),
                 Paragraph(markup_txt, style_celula),
-                Paragraph("SIM" if row.get('FALTA NA LOJA?') else "NÃO", style_celula)
+                Paragraph("SIM" if is_falta else "NÃO", style_celula)
             ])
 
         t1 = Table(data_audit, colWidths=[310, 85, 95, 85, 120, 50])
@@ -367,10 +365,14 @@ else:
                 p_sug = converter_preco(r['SUGERIDO'])
                 p_loj = float(r['PREÇO GÔNDOLA'])
                 p_pago_item = r['PREÇO PAGO']
+                is_falta_tela = r['FALTA NA LOJA?']
                 
                 custo_base = float(p_pago_item) if isinstance(p_pago_item, (int, float)) else 0.0
                 
-                if custo_base > 0:
+                if is_falta_tela or p_loj == 0.0:
+                    loja_str = "❌ FALTA"
+                    status_markup = "🚨 Produto em Falta na Loja"
+                elif custo_base > 0:
                     mk_rec = ((p_sug - custo_base) / custo_base) * 100 if p_sug > 0 else 0.0
                     mk_loj = ((p_loj - custo_base) / custo_base) * 100 if p_loj > 0 else 0.0
                     
