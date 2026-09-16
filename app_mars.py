@@ -117,7 +117,7 @@ def carregar_historico_gerencial():
         return pd.DataFrame()
 
 def recuperar_detalhes_auditoria(loja, data_hora_str):
-    """Busca os itens auditados da loja numa data específica na aba de detalhes."""
+    """Busca os itens auditados exatos salvos na aba de detalhes para a loja e horário."""
     try:
         creds_dict = st.secrets["gcp_service_account"]
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -132,29 +132,24 @@ def recuperar_detalhes_auditoria(loja, data_hora_str):
         registros = aba_detalhe.get_all_records()
         df_detalhes = pd.DataFrame(registros)
         
-        # Filtra os dados da loja correspondente ao horário da pesquisa selecionada
         df_filtrado = df_detalhes[(df_detalhes['LOJA'] == loja) & (df_detalhes['DATA/HORA'] == data_hora_str)]
         
         df_audit = []
         df_faltantes = []
         
         for _, row in df_filtrado.iterrows():
-            if row['SITUAÇÃO'] == "FALTA" and float(row.get('PREÇO GÔNDOLA', 0)) == 0 and float(row.get('SUGERIDO', 0)) == 0:
-                 # Produto sem histórico de vendas (seção 2)
-                 df_faltantes.append([row['CÓDIGO'], row['PRODUTO'], row['SITUAÇÃO']])
+            status = str(row.get('SITUAÇÃO', '')).upper()
+            if "FALTA" in status and float(row.get('PREÇO GÔNDOLA', 0)) == 0 and float(row.get('SUGERIDO', 0)) == 0:
+                df_faltantes.append([row['CÓDIGO'], row['PRODUTO'], row['SITUAÇÃO']])
             else:
-                 # Produto auditado na tela principal (seção 1)
-                 df_audit.append({
-                     'CÓDIGO': row['CÓDIGO'],
-                     'PRODUTO': row['PRODUTO'],
-                     'FALTA NA LOJA?': True if row['SITUAÇÃO'] == "FALTA" else False,
-                     'PREÇO GÔNDOLA': float(row.get('PREÇO GÔNDOLA', 0)),
-                     'SUGERIDO': float(row.get('SUGERIDO', 0)),
-                     # Nota: como o preço pago médio não é salvo na planilha detalhada com o mesmo formato,
-                     # o recálculo do PDF pode exigir o valor original ou ser adaptado.
-                     # Vamos buscar o custo no momento se possível ou deixar 0.
-                     'PREÇO PAGO': 0.0 # Idealmente deveríamos salvar o "PREÇO PAGO" na aba oportunidades detalhadas
-                 })
+                df_audit.append({
+                    'CÓDIGO': row['CÓDIGO'],
+                    'PRODUTO': row['PRODUTO'],
+                    'FALTA NA LOJA?': True if "FALTA" in status else False,
+                    'PREÇO GÔNDOLA': float(row.get('PREÇO GÔNDOLA', 0)),
+                    'SUGERIDO': float(row.get('SUGERIDO', 0)),
+                    'PREÇO PAGO': 0.0
+                })
                  
         return pd.DataFrame(df_audit), df_faltantes
     except Exception as e:
@@ -382,61 +377,8 @@ def enviar_email(assunto, pdf, lista_destinatarios, texto_customizado=""):
     except:
         return False
 
-# --- FUNÇÃO GERADORA COMPLETA (BENEDITO) ---
 def gerar_pdf_com_historico(loja, data_hora_str, promotor_nome, cidade, obs):
-    # Tenta recuperar os itens detalhados salvos na planilha
     df_audit, df_faltantes = recuperar_detalhes_auditoria(loja, data_hora_str)
-    
-    if df_audit.empty and not df_faltantes:
-        # Se por algum motivo a leitura da aba de detalhes falhar,
-        # tentamos reconstruir através do Vendas.xlsx para essa loja
-        df_vendas = carregar_dados()
-        if not df_vendas.empty:
-             df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].apply(limpar_texto)
-             v_loja = df_vendas[df_vendas['CLIENTE NOME'] == loja]
-             if not v_loja.empty:
-                 comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique())
-                 dados_audit_view, prod_faltantes = [], []
-                 
-                 # Define arquivo base do promotor
-                 arq_precos = "MINEIROS PREÇOS MARS COMPLETO.csv"
-                 if promotor_nome in ["RODRIGO", "CAROLINA", "SARUETE"]:
-                     arq_precos = "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
-                     
-                 for c, n in PRODUTOS_FOCAIS.items():
-                    historico_item = v_loja[v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == c].copy()
-                    preco_ultimo_pedido = 0.0
-                    tem_venda = False
-                    if not historico_item.empty and 'DATA' in historico_item.columns:
-                        historico_item['DATA_DT'] = pd.to_datetime(historico_item['DATA'], errors='coerce')
-                        historico_item = historico_item.sort_values(by='DATA_DT', ascending=False)
-                        ultima_linha = historico_item.iloc[0]
-                        dt_ult = ultima_linha['DATA_DT']
-                        qtd_ult = ultima_linha.get('TOTAL QTD', 0)
-                        val_ult = ultima_linha.get('TOTAL VALOR', 0)
-                        op_ult = str(ultima_linha.get('OPERACAO', 'VENDA')).strip()
-                        if pd.notna(qtd_ult) and qtd_ult > 0:
-                            preco_ultimo_pedido = val_ult / qtd_ult
-                            tem_venda = True
-                        info_ultima_compra = f" (Última: {dt_ult.strftime('%d/%m/%Y') if pd.notna(dt_ult) else 'Desconhecida'} - {op_ult} - Qtd: {int(qtd_ult) if pd.notna(qtd_ult) else 0})"
-                    else:
-                        info_ultima_compra = ""
-                    produto_nome_detalhado = f"{n}{info_ultima_compra}"
-                    if c in comp_cli:
-                        dados_audit_view.append({
-                            "FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": produto_nome_detalhado, 
-                            "PREÇO PAGO": preco_ultimo_pedido, 
-                            "PREÇO GÔNDOLA": 0.0, "SUGERIDO": buscar_preco_na_tabela(arq_precos, c)
-                        })
-                    else:
-                        if not historico_item.empty:
-                            status_hist = f"PRODUTO NÃO ENCONTRADO NA LOJA{info_ultima_compra}"
-                        else:
-                            status_hist = "PRODUTO NÃO ENCONTRADO NA LOJA (NÃO COMPRADO ESTE ANO)"
-                        prod_faltantes.append([c, produto_nome_detalhado, status_hist])
-                 df_audit = pd.DataFrame(dados_audit_view)
-                 
-    # O arquivo PDF final
     return gerar_pdf_mars(promotor_nome, loja, cidade, df_audit, df_faltantes, obs)
 
 # --- INTERFACE PRINCIPAL ---
@@ -512,7 +454,6 @@ else:
                             sucessos = 0
                             for _, row in selecionados.iterrows():
                                 loja_nome = row.get('LOJA', 'Loja')
-                                # RECRIA O PDF COMPLETO COM DADOS DA PLANILHA / VENDAS
                                 pdf_file = gerar_pdf_com_historico(loja_nome, row.get('DATA/HORA', ''), row.get('PROMOTOR', 'Promotor'), row.get('CIDADE', ''), row.get('OBS', ''))
                                 if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (SP): {loja_nome}", pdf_file, EMAILS_TIME_SP, texto_personalizado_benedito):
                                     sucessos += 1
