@@ -160,7 +160,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
             Paragraph("<b>P. RECOMENDADO</b>", style_celula_cabecalho),
             Paragraph("<b>P. PAGO ÚLTIMO PEDIDO</b>", style_celula_cabecalho),
             Paragraph("<b>P. GÔNDOLA</b>", style_celula_cabecalho),
-            Paragraph("<b>MARKUP (REC. / LOJA)</b>", style_celula_cabecalho),
+            Paragraph("<b>MARKUP PRATICADO</b>", style_celula_cabecalho),
             Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
         ]]
         
@@ -188,11 +188,10 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 markup_recomendado = 0.0
 
             if p_custo_ult > 0:
-                cor_rec = "#059669"
                 cor_loja = "#991B1B" if markup_praticado > markup_recomendado else "#059669"
-                markup_txt = f"<b><font color='{cor_rec}'>Rec: {markup_recomendado:.0f}%</font></b><br/><b><font color='{cor_loja}'>Loja: {markup_praticado:.0f}%</font></b>"
+                markup_txt = f"<b><font color='{cor_loja}'>{markup_praticado:.0f}%</font></b>"
             else:
-                markup_txt = f"<b><font color='#059669'>Rec: N/D</font></b><br/><b>Loja: N/D</b>"
+                markup_txt = "<b>N/D</b>"
 
             pago_str = f"R$ {p_custo_ult:.2f}" if p_custo_ult > 0 else str(p_pago_val)
 
@@ -380,16 +379,13 @@ else:
                     else:
                         status_markup = "✅ Adequado (Igual ou Menor)"
                         
-                    rec_str = f"R$ {p_sug:.2f} ({mk_rec:.1f}%)"
                     loja_str = f"R$ {p_loj:.2f} ({mk_loj:.1f}%)"
                 else:
-                    rec_str = f"R$ {p_sug:.2f}"
                     loja_str = f"R$ {p_loj:.2f}"
                     status_markup = "Sem base de custo"
 
                 preview_markup.append({
                     "Produto": r['PRODUTO'],
-                    "Preço Recomendado": rec_str,
                     "Preço Gôndola": loja_str,
                     "Status / Avaliação": status_markup
                 })
