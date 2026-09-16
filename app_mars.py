@@ -145,7 +145,7 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     
     style_celula = ParagraphStyle('EstiloCelula', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=1)
     style_celula_esq = ParagraphStyle('EstiloCelulaEsq', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.HexColor('#1F2937'), alignment=0)
-    style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=10, leading=12, textColor=colors.white, fontName="Helvetica-Bold", alignment=1)
+    style_celula_cabecalho = ParagraphStyle('EstiloCelulaCab', parent=estilos['Normal'], fontSize=9, leading=11, textColor=colors.white, fontName="Helvetica-Bold", alignment=1)
 
     dt_pdf = obter_horario_brasil()
     elementos.append(Paragraph("<b>RELATÓRIO DE OPORTUNIDADES E MARKUP MARS</b>", estilos['Title']))
@@ -157,11 +157,11 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
         elementos.append(Paragraph("<b>1. AUDITORIA DE PREÇOS, FALTA E MARKUP</b>", estilos['Heading3']))
         data_audit = [[
             Paragraph("<b>PRODUTO</b>", style_celula_cabecalho),
-            Paragraph("<b>P. RECOMENDADO</b>", style_celula_cabecalho),
-            Paragraph("<b>P. PAGO ÚLTIMO PEDIDO</b>", style_celula_cabecalho),
-            Paragraph("<b>P. GÔNDOLA</b>", style_celula_cabecalho),
+            Paragraph("<b>PREÇO RECOMENDADO</b>", style_celula_cabecalho),
+            Paragraph("<b>PREÇO PAGO ÚLTIMO PEDIDO</b>", style_celula_cabecalho),
+            Paragraph("<b>PREÇO DE GONDOLA</b>", style_celula_cabecalho),
             Paragraph("<b>MARKUP PRATICADO</b>", style_celula_cabecalho),
-            Paragraph("<b>FALTA?</b>", style_celula_cabecalho)
+            Paragraph("<b>FALTA</b>", style_celula_cabecalho)
         ]]
         
         table_styles = [
@@ -188,11 +188,11 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 markup_recomendado = ((p_rec - p_custo_ult) / p_custo_ult) * 100 if p_rec > 0 else 0.0
                 
                 if markup_praticado > 200:
-                    cor_loja = "#7C3AED" # Roxo destacado para markup acima de 200%
+                    cor_loja = "#7C3AED"
                 elif markup_praticado > markup_recomendado:
-                    cor_loja = "#991B1B" # Vermelho se acima do recomendado
+                    cor_loja = "#991B1B"
                 else:
-                    cor_loja = "#059669" # Verde se adequado
+                    cor_loja = "#059669"
                     
                 markup_txt = f"<b><font color='{cor_loja}'>{markup_praticado:.0f}%</font></b>"
             else:
@@ -212,7 +212,8 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
                 Paragraph("SIM" if is_falta else "NÃO", style_celula)
             ])
 
-        t1 = Table(data_audit, colWidths=[310, 85, 95, 85, 120, 50])
+        # Ajuste de largura das colunas proporcional para caber os novos títulos perfeitamente
+        t1 = Table(data_audit, colWidths=[240, 105, 115, 105, 110, 50])
         t1.setStyle(TableStyle(table_styles))
         elementos.append(t1)
 
