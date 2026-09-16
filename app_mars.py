@@ -294,23 +294,33 @@ def gerar_pdf_mars(promotor, loja, cidade, df_audit, df_faltantes, feedback):
     doc.build(elementos)
     return nome_arquivo
 
-def enviar_email(assunto, pdf, lista_destinatarios):
+def enviar_email(assunto, pdf, lista_destinatarios, texto_customizado=""):
     rem, sen = "beneditobandola@gmail.com", "kfih ccqx cskn oito"
     msg = MIMEMultipart()
     msg['From'] = rem
     msg['To'] = ", ".join(lista_destinatarios)
     msg['Subject'] = assunto
     
-    corpo_html = """
+    corpo_html = f"""
     <html>
       <body style="font-family: Arial, sans-serif; color: #1F2937;">
         <h2 style="color: #1E3A8A;">🐾 Relatório de Oportunidades & Markup - Mars</h2>
+    """
+    if texto_customizado.strip():
+        corpo_html += f"""
+        <div style="background-color: #FEF3C7; border-left: 4px solid #D97706; padding: 12px; margin-bottom: 15px;">
+          <p style="margin: 0; font-size: 14px; font-weight: bold; color: #92400E;">Mensagem do Coordenador (Benedito):</p>
+          <p style="margin: 5px 0 0 0; font-size: 14px; color: #1F2937;">{texto_customizado.replace(chr(10), '<br>')}</p>
+        </div>
+        """
+    corpo_html += """
         <p>Segue em anexo o relatório detalhado da auditoria realizada em campo.</p>
         <hr style="border: none; border-top: 1px solid #E5E7EB;">
         <p style="font-size: 12px; color: #6B7280;">Mensagem automática gerada pela Torre de Controle Minassal.</p>
       </body>
     </html>
     """
+    
     msg.attach(MIMEText(corpo_html, 'html'))
     
     try:
@@ -361,7 +371,7 @@ if 'user_mars' not in st.session_state:
 else:
     promotor = st.session_state.user_mars
 
-    # --- PAINEL EXCLUSIVO DO BENEDITO (GESTOR) COM FILTRO DO MÊS ---
+    # --- PAINEL EXCLUSIVO DO BENEDITO (GESTOR) COM TEXTO E SELEÇÃO DO MÊS ---
     if promotor == "BENEDITO":
         st.sidebar.markdown("### 👑 Gestor: Benedito")
         if st.sidebar.button("Sair do Painel"):
@@ -369,7 +379,9 @@ else:
             st.rerun()
 
         st.markdown("## 📊 Painel Gerencial - Torre de Controle")
-        st.markdown("Histórico de auditorias registradas no **mês atual**.")
+        st.markdown("Selecione abaixo as pesquisas desejadas (**filtradas automaticamente para o mês atual**), digite seu recado (opcional) e encaminhe.")
+
+        texto_personalizado_benedito = st.text_area("📝 Digite o texto que irá no corpo do e-mail (opcional):", placeholder="Ex: Time, favor acompanhar de perto as lojas listadas abaixo...")
 
         df_hist = carregar_historico_gerencial()
         if not df_hist.empty:
@@ -383,13 +395,30 @@ else:
             if df_hist.empty:
                 st.info("Nenhum relatório registrado na planilha de controle para este mês.")
             else:
-                st.dataframe(df_hist, use_container_width=True, hide_index=True)
-                st.success("✅ O sistema está registrando todas as pesquisas do mês com segurança.")
+                df_hist.insert(0, "SELECIONAR", False)
+                df_selecionado = st.data_editor(df_hist, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                st.markdown("### ⚡ Ações Rápidas de Encaminhamento & Teste")
+                
+                col_a, col_b, col_c = st.columns(3)
+                
+                with col_a:
+                    if st.button("📤 ENCAMINHAR PARA O TIME SP", use_container_width=True):
+                        st.info("Ação em processamento para o Time SP...")
+                
+                with col_b:
+                    if st.button("📤 ENCAMINHAR PARA O TIME MG", use_container_width=True):
+                        st.info("Ação em processamento para o Time MG...")
+
+                with col_c:
+                    if st.button("🧪 TESTAR (SÓ PARA BENEDITO)", use_container_width=True):
+                        st.info("Ação de teste em processamento...")
         else:
             st.info("Nenhum relatório registrado na planilha de controle ainda.")
 
     else:
-        # --- FLUXO NORMAL DOS PROMOTORES COM BOTÕES DE ESCOLHA DE ENVIO ---
+        # --- FLUXO NORMAL DOS PROMOTORES (LIMPO, SEM BOTÕES EXTRAS) ---
         df_vendas = carregar_dados()
         if df_vendas.empty:
             st.error("Aguardando carregamento da base do cubo de vendas...")
@@ -518,117 +547,79 @@ else:
                 st.dataframe(df_prev, use_container_width=True, hide_index=True)
 
                 obs_text = st.text_area("🗣️ Observações:")
-                
-                # --- BOTÕES DE ESCOLHA DE DESTINO PARA OS PROMOTORES ---
-                st.markdown("---")
-                st.markdown("### 📤 Enviar Relatório para:")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if st.button("🚀 ENVIAR PARA TIME SP", use_container_width=True):
-                        tem_preco_zerado = any(float(r['PREÇO GÔNDOLA']) == 0.0 and not r['FALTA NA LOJA?'] for r in df_edit.to_dict('records'))
-                        if tem_preco_zerado:
-                            st.error("🚨 Há produtos com Preço Gôndola zerado sem estar marcado como falta.")
-                        else:
-                            horario_ref = obter_horario_brasil()
-                            detalhado_rows = []
-                            for r in df_edit.to_dict('records'):
-                                status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                                detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), converter_preco(r['SUGERIDO'])])
-                            for f in prod_faltantes:
-                                detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
-                            
-                            pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
-                            if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (SP): {loja}", pdf_file, EMAILS_TIME_SP):
-                                salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
-                                st.success("Enviado com sucesso para o Time SP!"); st.balloons()
+                if st.button("🚀 ENVIAR RELATÓRIO"):
+                    tem_preco_zerado = False
+                    for r in df_edit.to_dict('records'):
+                        p_loj = float(r['PREÇO GÔNDOLA'])
+                        falta = r['FALTA NA LOJA?']
+                        if p_loj == 0.0 and not falta:
+                            tem_preco_zerado = True
+                            break
 
-                with col2:
-                    if st.button("🚀 ENVIAR PARA TIME MG", use_container_width=True):
-                        tem_preco_zerado = any(float(r['PREÇO GÔNDOLA']) == 0.0 and not r['FALTA NA LOJA?'] for r in df_edit.to_dict('records'))
-                        if tem_preco_zerado:
-                            st.error("🚨 Há produtos com Preço Gôndola zerado sem estar marcado como falta.")
-                        else:
-                            horario_ref = obter_horario_brasil()
-                            detalhado_rows = []
-                            for r in df_edit.to_dict('records'):
-                                status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
-                                detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), converter_preco(r['SUGERIDO'])])
-                            for f in prod_faltantes:
-                                detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
-                            
-                            pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
-                            if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (MG): {loja}", pdf_file, EMAILS_TIME_MG):
-                                salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
-                                st.success("Enviado com sucesso para o Time MG!"); st.balloons()
-
-                with col3:
-                    if st.button("🧪 TESTAR (SÓ PARA BENEDITO)", use_container_width=True):
-                        tem_preco_zerado = any(float(r['PREÇO GÔNDOLA']) == 0.0 and not r['FALTA NA LOJA?'] for r in df_edit.to_dict('records'))
-                        if tem_preco_zerado:
-                            st.error("🚨 Há produtos com Preço Gôndola zerado sem estar marcado como falta.")
-                        else:
-                            horario_ref = obter_horario_brasil()
-                            pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
-                            if enviar_email(f"🧪 [TESTE] OPORTUNIDADE & MARKUP: {loja}", pdf_file, ["benedito.bandola@minassal.com.br"]):
-                                st.success("Enviado com sucesso apenas para o seu e-mail de teste!"); st.balloons()
+                    if tem_preco_zerado:
+                        st.error("🚨 **Atenção:** Há produtos com o **Preço Gôndola zerado (R$ 0,00)** que **não** estão marcados como falta (`FALTA NA LOJA?`). Por favor, preencha o preço correto ou marque a caixa de falta antes de enviar.")
+                    else:
+                        horario_ref = obter_horario_brasil()
+                        detalhado_rows = []
+                        for r in df_edit.to_dict('records'):
+                            status_val = "FALTA" if r['FALTA NA LOJA?'] or float(r['PREÇO GÔNDOLA']) == 0 else "TEM"
+                            p_sugerido_limpo = converter_preco(r['SUGERIDO'])
+                            detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, r['CÓDIGO'], r['PRODUTO'], status_val, float(r['PREÇO GÔNDOLA']), p_sugerido_limpo])
+                        for f in prod_faltantes:
+                            detalhado_rows.append([horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0])
+                        
+                        pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, df_edit, prod_faltantes, obs_text)
+                        
+                        destinos = EMAILS_TIME_SP if promotor in ["RODRIGO", "CAROLINA", "SARUETE"] else EMAILS_TIME_MG
+                        if enviar_email(f"🐾 OPORTUNIDADE & MARKUP: {loja}", pdf_file, destinos):
+                            salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, obs_text], detalhado_rows)
+                            st.success("Enviado com sucesso!"); st.balloons()
             else:
                 st.warning("🚨 Mix Zero!")
                 obs_z_mix = st.text_area("🗣️ Justificativa Mix Zero:")
-                
-                col_mz1, col_mz2 = st.columns(2)
-                with col_mz1:
-                    if st.button("🚨 ENVIAR MIX ZERO (SP)", use_container_width=True):
-                        horario_ref = obter_horario_brasil()
-                        detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
-                        pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), prod_faltantes, obs_z_mix)
-                        if enviar_email(f"🚨 MIX ZERO (SP): {loja}", pdf_file, EMAILS_TIME_SP):
-                            salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
-                            st.success("Mix Zero enviado para o Time SP!"); st.balloons()
-                with col_mz2:
-                    if st.button("🚨 ENVIAR MIX ZERO (MG)", use_container_width=True):
-                        horario_ref = obter_horario_brasil()
-                        detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
-                        pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), prod_faltantes, obs_z_mix)
-                        if enviar_email(f"🚨 MIX ZERO (MG): {loja}", pdf_file, EMAILS_TIME_MG):
-                            salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
-                            st.success("Mix Zero enviado para o Time MG!"); st.balloons()
+                if st.button("🚨 ENVIAR MIX ZERO"):
+                    horario_ref = obter_horario_brasil()
+                    detalhado_rows = [[horario_ref, promotor, loja, cidade_cliente, f[0], f[1], f[2], 0.0, 0.0] for f in prod_faltantes]
+                    pdf_file = gerar_pdf_mars(promotor, loja, cidade_cliente, pd.DataFrame(), prod_faltantes, obs_z_mix)
+                    destinos = EMAILS_TIME_SP if promotor in ["RODRIGO", "CAROLINA", "SARUETE"] else EMAILS_TIME_MG
+                    if enviar_email(f"🚨 MIX ZERO: {loja}", pdf_file, destinos):
+                        salvar_nas_planilhas([horario_ref, promotor, loja, cidade_cliente, "MIX ZERO: "+obs_z_mix], detalhado_rows)
+                        st.success("Mix Zero registrado com sucesso!"); st.balloons()
 
-        st.markdown("---")
-        st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
-        
-        vendas_mars_loja = df_vendas[
-            (df_vendas['CLIENTE NOME'] == loja) & 
-            (df_vendas['FABRICANTE NOME'].astype(str).str.upper().str.contains("MARS", na=False))
-        ].copy()
-        
-        if not vendas_mars_loja.empty:
-            total_compras = len(vendas_mars_loja)
-            soma_qtd = vendas_mars_loja['TOTAL QTD'].sum() if 'TOTAL QTD' in vendas_mars_loja.columns else 0
+            st.markdown("---")
+            st.markdown("### 📋 Histórico de Compras da Loja - Produtos Mars (Este Ano)")
             
-            st.info(f"📊 **Resumo Anual:** {total_compras} registros de pedidos encontrados | **Soma Total de Quantidade Comprada:** {soma_qtd:,.0f} unidades")
+            vendas_mars_loja = df_vendas[
+                (df_vendas['CLIENTE NOME'] == loja) & 
+                (df_vendas['FABRICANTE NOME'].astype(str).str.upper().str.contains("MARS", na=False))
+            ].copy()
+            
+            if not vendas_mars_loja.empty:
+                total_compras = len(vendas_mars_loja)
+                soma_qtd = vendas_mars_loja['TOTAL QTD'].sum() if 'TOTAL QTD' in vendas_mars_loja.columns else 0
+                
+                st.info(f"📊 **Resumo Anual:** {total_compras} registros de pedidos encontrados | **Soma Total de Quantidade Comprada:** {soma_qtd:,.0f} unidades")
 
-            if 'DATA' in vendas_mars_loja.columns:
-                vendas_mars_loja['DATA_DT'] = pd.to_datetime(vendas_mars_loja['DATA'], errors='coerce')
-                vendas_mars_loja['DATA_FORMATADA'] = vendas_mars_loja['DATA_DT'].dt.strftime('%d/%m/%Y')
+                if 'DATA' in vendas_mars_loja.columns:
+                    vendas_mars_loja['DATA_DT'] = pd.to_datetime(vendas_mars_loja['DATA'], errors='coerce')
+                    vendas_mars_loja['DATA_FORMATADA'] = vendas_mars_loja['DATA_DT'].dt.strftime('%d/%m/%Y')
+                else:
+                    vendas_mars_loja['DATA_DT'] = pd.NaT
+                    vendas_mars_loja['DATA_FORMATADA'] = ""
+                    
+                tabela_historico = vendas_mars_loja[['DATA_DT', 'DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
+                tabela_historico.columns = ['DATA_SORT', 'Data do Pedido', 'Produto Mars', 'Tipo de Operação', 'Qtd']
+                tabela_historico = tabela_historico.sort_values(by='DATA_SORT', ascending=False)
+                tabela_historico = tabela_historico.drop(columns=['DATA_SORT'])
+                
+                def colorir_operacao(val):
+                    v = str(val).upper()
+                    if "BONIF" in v:
+                        return 'background-color: #FEF3C7; color: #92400E; font-weight: bold;'
+                    elif "DEVOL" in v:
+                        return 'background-color: #FEE2E2; color: #991B1B; font-weight: bold;'
+                    return ''
+
+                st.dataframe(tabela_historico.style.map(colorir_operacao, subset=['Tipo de Operação']), use_container_width=True, hide_index=True)
             else:
-                vendas_mars_loja['DATA_DT'] = pd.NaT
-                vendas_mars_loja['DATA_FORMATADA'] = ""
-                
-            tabela_historico = vendas_mars_loja[['DATA_DT', 'DATA_FORMATADA', 'PRODUTO NOME', 'OPERACAO', 'TOTAL QTD']].dropna(subset=['PRODUTO NOME'])
-            tabela_historico.columns = ['DATA_SORT', 'Data do Pedido', 'Produto Mars', 'Tipo de Operação', 'Qtd']
-            tabela_historico = tabela_historico.sort_values(by='DATA_SORT', ascending=False)
-            tabela_historico = tabela_historico.drop(columns=['DATA_SORT'])
-            
-            def colorir_operacao(val):
-                v = str(val).upper()
-                if "BONIF" in v:
-                    return 'background-color: #FEF3C7; color: #92400E; font-weight: bold;'
-                elif "DEVOL" in v:
-                    return 'background-color: #FEE2E2; color: #991B1B; font-weight: bold;'
-                return ''
-
-            st.dataframe(tabela_historico.style.map(colorir_operacao, subset=['Tipo de Operação']), use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum registro de compra de produtos Mars encontrado para esta loja no período.")
+                st.info("Nenhum registro de compra de produtos Mars encontrado para esta loja no período.")
