@@ -34,7 +34,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- DEFINIÇÃO DOS TIMES DE E-MAILS (PARA O PAINEL DO GESTOR) ---
+# --- DEFINIÇÃO DOS TIMES DE E-MAILS ---
 EMAILS_TIME_SP = [
     "caio.poli@minassal.com.br",
     "poli@minassal.com.br",
@@ -115,6 +115,53 @@ def carregar_historico_gerencial():
         return pd.DataFrame(dados)
     except:
         return pd.DataFrame()
+
+def recuperar_detalhes_auditoria(loja, data_hora_str):
+    """Busca os itens salvos na aba de detalhes da planilha para recriar o PDF com exatidão."""
+    try:
+        creds_dict = st.secrets["gcp_service_account"]
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open("Torre_de_Controle_Mars")
+        try:
+            aba_detalhe = spreadsheet.worksheet("oportunidades detalhadas")
+        except:
+            aba_detalhe = spreadsheet.get_worksheet(1)
+        
+        registros = aba_detalhe.get_all_records()
+        df_detalhes = pd.DataFrame(registros)
+        df_detalhes.columns = [c.strip().upper() for c in df_detalhes.columns]
+        
+        df_filtrado = df_detalhes[(df_detalhes['LOJA'] == loja) & (df_detalhes['DATA/HORA'] == data_hora_str)]
+        
+        df_audit = []
+        df_faltantes = []
+        
+        for _, row in df_filtrado.iterrows():
+            status = str(row.get('SITUAÇÃO', '')).upper()
+            codigo = str(row.get('CÓDIGO', ''))
+            produto = str(row.get('PRODUTO', ''))
+            preco_gondola = float(row.get('PREÇO GÔNDOLA', 0) or row.get('PRECO GONDOLA', 0) or 0)
+            sugerido = float(row.get('SUGERIDO', 0) or 0)
+            
+            if "FALTA" in status and preco_gondola == 0 and sugerido == 0:
+                df_faltantes.append([codigo, produto, status])
+            elif "PRODUTO NÃO ENCONTRADO" in status:
+                df_faltantes.append([codigo, produto, status])
+            else:
+                df_audit.append({
+                    'CÓDIGO': codigo,
+                    'PRODUTO': produto,
+                    'FALTA NA LOJA?': True if "FALTA" in status or preco_gondola == 0 else False,
+                    'PREÇO GÔNDOLA': preco_gondola,
+                    'SUGERIDO': sugerido,
+                    'PREÇO PAGO': 0.0
+                })
+                 
+        return pd.DataFrame(df_audit), df_faltantes
+    except Exception as e:
+        return pd.DataFrame(), []
 
 # --- CARREGAR BASE DE VENDAS ---
 @st.cache_data(ttl=300)
@@ -337,6 +384,24 @@ def enviar_email(assunto, pdf, lista_destinatarios, texto_customizado=""):
     except:
         return False
 
+def gerar_pdf_com_historico(loja, data_hora_str, promotor_nome, cidade, obs):
+    df_audit, df_faltantes = recuperar_detalhes_auditoria(loja, data_hora_str)
+    if df_audit.empty and not df_faltantes:
+        # Fallback de segurança caso a aba detalhada não traga linhas
+        df_vendas = carregar_dados()
+        arq_precos = "MINEIROS PREÇOS MARS COMPLETO.csv" if promotor_nome not in ["RODRIGO", "CAROLINA", "SARUETE"] else "PAULISTINHAS_MARS_PRECO_ATUALIZADO.csv"
+        v_loja = df_vendas[df_vendas['CLIENTE NOME'] == loja] if not df_vendas.empty else pd.DataFrame()
+        comp_cli = set(v_loja['PRODUTO CODIGO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()) if not v_loja.empty else set()
+        dados_audit_view, prod_faltantes = [], []
+        for c, n in PRODUTOS_FOCAIS.items():
+            if c in comp_cli:
+                dados_audit_view.append({"FALTA NA LOJA?": False, "CÓDIGO": c, "PRODUTO": n, "PREÇO PAGO": 0.0, "PREÇO GÔNDOLA": buscar_preco_na_tabela(arq_precos, c), "SUGERIDO": buscar_preco_na_tabela(arq_precos, c)})
+            else:
+                prod_faltantes.append([c, n, "PRODUTO NÃO ENCONTRADO NA LOJA"])
+        df_audit = pd.DataFrame(dados_audit_view)
+        return gerar_pdf_mars(promotor_nome, loja, cidade, df_audit, prod_faltantes, obs)
+    return gerar_pdf_mars(promotor_nome, loja, cidade, df_audit, df_faltantes, obs)
+
 # --- INTERFACE PRINCIPAL ---
 st.markdown("<h1 style='text-align:center;'>🐾 SISTEMA DE OPORTUNIDADES & MARKUP MARS</h1>", unsafe_allow_html=True)
 
@@ -405,15 +470,60 @@ else:
                 
                 with col_a:
                     if st.button("📤 ENCAMINHAR PARA O TIME SP", use_container_width=True):
-                        st.info("Função de reenvio gerencial em processamento...")
+                        selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
+                        if not selecionados.empty:
+                            sucessos = 0
+                            for _, row in selecionados.iterrows():
+                                loja_nome = row.get('LOJA', 'Loja')
+                                promotor_nome = row.get('PROMOTOR', 'Promotor')
+                                cidade_nome = row.get('CIDADE', '')
+                                data_hora_envio = row.get('DATA/HORA', '')
+                                obs_envio = row.get('OBSERVAÇÕES', '') or row.get('OBS', '')
+                                
+                                pdf_file = gerar_pdf_com_historico(loja_nome, data_hora_envio, promotor_nome, cidade_nome, obs_envio)
+                                if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (SP): {loja_nome}", pdf_file, EMAILS_TIME_SP, texto_personalizado_benedito):
+                                    sucessos += 1
+                            st.success(f"✅ {sucessos} relatório(s) encaminhado(s) para o **Time SP**!")
+                        else:
+                            st.warning("⚠️ Selecione ao menos uma linha na tabela.")
                 
                 with col_b:
                     if st.button("📤 ENCAMINHAR PARA O TIME MG", use_container_width=True):
-                        st.info("Função de reenvio gerencial em processamento...")
+                        selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
+                        if not selecionados.empty:
+                            sucessos = 0
+                            for _, row in selecionados.iterrows():
+                                loja_nome = row.get('LOJA', 'Loja')
+                                promotor_nome = row.get('PROMOTOR', 'Promotor')
+                                cidade_nome = row.get('CIDADE', '')
+                                data_hora_envio = row.get('DATA/HORA', '')
+                                obs_envio = row.get('OBSERVAÇÕES', '') or row.get('OBS', '')
+                                
+                                pdf_file = gerar_pdf_com_historico(loja_nome, data_hora_envio, promotor_nome, cidade_nome, obs_envio)
+                                if enviar_email(f"🐾 OPORTUNIDADE & MARKUP (MG): {loja_nome}", pdf_file, EMAILS_TIME_MG, texto_personalizado_benedito):
+                                    sucessos += 1
+                            st.success(f"✅ {sucessos} relatório(s) encaminhado(s) para o **Time MG**!")
+                        else:
+                            st.warning("⚠️ Selecione ao menos uma linha na tabela.")
 
                 with col_c:
                     if st.button("🧪 TESTAR (SÓ PARA BENEDITO)", use_container_width=True):
-                        st.info("Função de teste em processamento...")
+                        selecionados = df_selecionado[df_selecionado["SELECIONAR"] == True]
+                        if not selecionados.empty:
+                            sucessos = 0
+                            for _, row in selecionados.iterrows():
+                                loja_nome = row.get('LOJA', 'Loja')
+                                promotor_nome = row.get('PROMOTOR', 'Promotor')
+                                cidade_nome = row.get('CIDADE', '')
+                                data_hora_envio = row.get('DATA/HORA', '')
+                                obs_envio = row.get('OBSERVAÇÕES', '') or row.get('OBS', '')
+                                
+                                pdf_file = gerar_pdf_com_historico(loja_nome, data_hora_envio, promotor_nome, cidade_nome, obs_envio)
+                                if enviar_email(f"🧪 [TESTE] OPORTUNIDADE & MARKUP: {loja_nome}", pdf_file, ["benedito.bandola@minassal.com.br"], texto_personalizado_benedito):
+                                    sucessos += 1
+                            st.success(f"🧪 {sucessos} relatório(s) de teste enviado(s) para **benedito.bandola@minassal.com.br**!")
+                        else:
+                            st.warning("⚠️ Selecione ao menos uma linha na tabela para o teste.")
         else:
             st.info("Nenhum relatório registrado na planilha de controle ainda.")
 
