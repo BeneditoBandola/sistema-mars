@@ -84,15 +84,22 @@ def salvar_nas_planilhas(resumo, detalhado):
         st.error(f"Erro na Planilha: {e}")
         return False
 
-# --- CARREGAR BASE DE VENDAS ---
+# --- CARREGAR BASE DE VENDAS (BUSCA AUTOMÁTICA DE QUALQUER ZIP QUE COMECE COM 'VENDAS') ---
 @st.cache_data(ttl=300)
 def carregar_dados():
     diretorio_atual = os.path.dirname(__file__) if '__file__' in locals() else "."
     df_v = pd.DataFrame()
-    nome_zip = "vendas somente mars de 2026 ate 15 de setembro.zip"
-    caminho_zip = os.path.join(diretorio_atual, nome_zip)
-    if not os.path.exists(caminho_zip):
-        caminho_zip = nome_zip if os.path.exists(nome_zip) else None
+    
+    # Procura por arquivos .zip que comecem com 'vendas' (ignorando maiúsculas/minúsculas) na pasta atual
+    caminho_zip = None
+    try:
+        arquivos_pasta = os.listdir(diretorio_atual)
+        for arq in arquivos_pasta:
+            if arq.lower().startswith("vendas") and arq.lower().endswith(".zip"):
+                caminho_zip = os.path.join(diretorio_atual, arq)
+                break
+    except:
+        pass
 
     try:
         if caminho_zip and os.path.exists(caminho_zip):
